@@ -2,7 +2,6 @@ import spidev
 import lgpio
 import time
 from hardware.gpio_handle import gpio_open
-
 class MFRC522:
     # ===== GPIO =====
     NRSTPD = 22  # BCM GPIO22
@@ -46,16 +45,20 @@ class MFRC522:
     CRCResultRegL  = 0x22
 
     def __init__(self, bus=0, device=0, speed=1_000_000):
-        # SPI
         self.spi = spidev.SpiDev()
         self.spi.open(bus, device)
         self.spi.max_speed_hz = speed
         self.spi.mode = 0
-
-        # lgpio
+        self.NRSTPD = 22
         
-        self.gpio = gpio_open()
-        lgpio.gpio_claim_output(self.gpio, self.NRSTPD, 1)
+        self.gpio = gpio_open() 
+        try:
+            lgpio.gpio_claim_output(self.gpio, self.NRSTPD, 1)
+        except lgpio.error as e:
+            if "busy" in str(e).lower():
+                print("?? RST Pin already claimed. Re-using existing handle.")
+            else:
+                raise e
         self.MFRC522_Init()
 
     # ===== LOW LEVEL =====
@@ -146,4 +149,4 @@ class MFRC522:
 
     def cleanup(self):
         self.spi.close()
-        lgpio.gpiochip_close(self.gpio)
+        # lgpio.gpiochip_close(self.gpio)
