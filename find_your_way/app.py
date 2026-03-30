@@ -3,10 +3,13 @@ import json
 import time
 import threading
 import importlib
+import os
+import glob
 from core.navigation import NavEngine
 import config.graph_data as config
 from hardware.rfid import RFIDReader
 from autonomous_main import AutonomousCar
+from hardware.motor import move_straight, turn_left, turn_right, stop
 
 def save_config(new_graph, new_turn_table, new_rfid_map, new_turn_config):
     path = "config/graph_data.py"
@@ -29,6 +32,63 @@ def reload_config():
 @st.cache_resource
 def get_rfid_reader():
     return RFIDReader()
+
+@st.cache_data(ttl=30)
+def detect_camera_source():
+    # Try Picamera2 first
+    try:
+        from picamera2 import Picamera2
+        picam2 = Picamera2()
+        config_cam = picam2.create_preview_configuration(main={'size': (640, 480)})
+        picam2.configure(config_cam)
+        picam2.start()
+        time.sleep(1)
+        frame = picam2.capture_array()
+        picam2.stop()
+        return {
+            'backend': 'picamera2',
+            'source': None,
+            'frame': frame,
+            'message': 'Picamera2 active',
+            'error': None,
+        }
+    except Exception as e:
+        pass
+
+    # Try OpenCV on /dev/video*
+    try:
+        import cv2
+        cams = sorted(glob.glob('/dev/video*'))
+        for cam in cams:
+            try:
+                idx = int(cam.replace('/dev/video', ''))
+            except ValueError:
+                continue
+            cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            ret, frame = cap.read()
+            cap.release()
+            if ret and frame is not None:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                return {
+                    'backend': 'opencv',
+                    'source': idx,
+                    'frame': frame,
+                    'message': f'OpenCV camera on /dev/video{idx}',
+                    'error': None,
+                }
+    except Exception:
+        pass
+
+    return {
+        'backend': None,
+        'source': None,
+        'frame': None,
+        'message': None,
+        'error': 'No camera available',
+    }
 
 st.set_page_config(page_title="Autonomous Car Control", layout="wide")
 st.title("LoPi")
@@ -115,3 +175,6 @@ with tabs[2]:
     with col_b:
         st.write("Turn Table")
         st.json({str(k): v for k, v in config.TURN_TABLE.items()})
+
+
+

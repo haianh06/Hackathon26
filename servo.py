@@ -54,11 +54,11 @@ def joystick_loop(exit_callback=None):
             stop()
         elif abs(y) > abs(x):
             if y > 0:
-                _set_pwm(LEFT_PIN,  STOP_L + DRIVE_SPEED)
-                _set_pwm(RIGHT_PIN, STOP_R - DRIVE_SPEED)
-            else:
                 _set_pwm(LEFT_PIN,  STOP_L - DRIVE_SPEED)
                 _set_pwm(RIGHT_PIN, STOP_R + DRIVE_SPEED)
+            else:
+                _set_pwm(LEFT_PIN,  STOP_L + DRIVE_SPEED)
+                _set_pwm(RIGHT_PIN, STOP_R - DRIVE_SPEED)
         else:
             if x < 0:
                 _set_pwm(LEFT_PIN,  STOP_L - TURN_SPEED)

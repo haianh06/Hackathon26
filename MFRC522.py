@@ -1,7 +1,7 @@
 import spidev
 import lgpio
 import time
-from hardware.gpio_handle import gpio_open
+from gpio_handle import gpio_open
 
 class MFRC522:
     # ===== GPIO =====
@@ -146,4 +146,3 @@ class MFRC522:
 
     def cleanup(self):
         self.spi.close()
-        lgpio.gpiochip_close(self.gpio)

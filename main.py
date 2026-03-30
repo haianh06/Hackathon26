@@ -36,17 +36,21 @@ def sonar_task():
 # ================= RFID THREAD =================
 def rfid_task():
     while running:
-        uid = rfid.read_uid_hex(timeout=0.5)
-        if uid:
-            with distance_lock:
-                d = latest_distance
+        try:
+            uid = rfid.read_uid_hex(timeout=0.5)
+            if uid:
+                with distance_lock:
+                    d = latest_distance
 
-            if d is not None:
-                print(f"🆔 UID: {uid} | 📏 Distance: {d:.1f} cm")
-            else:
-                print(f"🆔 UID: {uid} | 📏 Distance: N/A")
+                if d is not None:
+                    print(f"🆔 UID: {uid} | 📏 Distance: {d:.1f} cm")
+                else:
+                    print(f"🆔 UID: {uid} | 📏 Distance: N/A")
 
-            time.sleep(1)  # tránh spam khi giữ thẻ
+                time.sleep(1)  # tránh spam khi giữ thẻ
+        except OSError as e:
+            print(f"⚠️ RFID Error: {e}")
+            time.sleep(1)
 
 # ================= MAIN =================
 try:
