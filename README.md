@@ -67,7 +67,35 @@ python3 -m streamlit run find_your_way/app.py
 
 Nếu `streamlit: command not found`, dùng `python3 -m streamlit run find_your_way/app.py`.
 
-## 6. Tính năng hiện tại
+## 6. Lane Following Options
+
+### Option 1: Picamera2 (Recommended)
+```bash
+python3 lane_following.py
+```
+- Uses Picamera2 library for direct camera access
+- Best performance (~20-30 FPS)
+- Requires working Picamera2 installation
+
+### Option 2: libcamera (Alternative)
+```bash
+python3 lane_following_libcamera.py
+```
+- Uses `rpicam-still` command-line tool
+- Lower performance (~2 FPS) but reliable
+- Works when Picamera2 has issues
+- **Hiển thị camera trên màn hình** (DISPLAY=True)
+- Requires `libcamera-apps-lite` package
+
+### Option 3: Test Mode (No Hardware)
+```bash
+python3 lane_following_test.py
+```
+- Uses synthetic road patterns
+- Perfect for algorithm testing
+- No camera required
+
+## 7. Tính năng hiện tại
 
 - Tab Navigating: tính lại đường đi, chạy tự động (AutonomousCar)
 - Tab Mapping RFID: quét UID, gán node
