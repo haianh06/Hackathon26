@@ -18,8 +18,12 @@ lgpio.gpio_claim_output(h, LEFT_PIN)
 lgpio.gpio_claim_output(h, RIGHT_PIN)
 
 def _set_pwm(pin, us):
-    duty = (us / 20000) * 100
-    lgpio.tx_pwm(h, pin, PWM_FREQ, duty)
+    try:
+        if h is not None:
+            duty = (us / 20000) * 100
+            lgpio.tx_pwm(h, pin, PWM_FREQ, duty)
+    except Exception:
+        pass
 
 def stop():
     _set_pwm(LEFT_PIN, 0)    
@@ -37,8 +41,12 @@ def joystick_loop(exit_callback=None):
 
     stop()
     print("🎮 Motor control active (B to exit)")
-
+    import __main__
+    
     while True:
+        
+        if hasattr(__main__, 'running') and not __main__.running:
+            break
         pygame.event.pump()
 
         if joy.get_button(1):  # B
