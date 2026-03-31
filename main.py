@@ -62,7 +62,7 @@ def run_camera_display():
         from picamera2 import Picamera2
         picam2 = Picamera2()
         # Cấu hình kích thước và định dạng màu RGB888
-        config = picam2.create_preview_configuration(main={"size": (640, 480), "format": "RGB888"})
+        config = picam2.create_preview_configuration()
         picam2.configure(config)
         picam2.start()
         print("📸 libcamera Stream Started (Picamera2).")
