@@ -1,5 +1,3 @@
-<![CDATA[<div align="center">
-
 # 🚗 LoPi — Autonomous Vehicle on Raspberry Pi
 
 **Hackathon 2026 Project**
@@ -294,4 +292,3 @@ Truy cập tại `http://<pi-ip>:8501` sau khi khởi chạy Streamlit.
 **Hackathon 2026** · Built with ❤️ on Raspberry Pi
 
 </div>
-]]>
