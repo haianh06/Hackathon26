@@ -290,5 +290,3 @@ Truy cập tại `http://<pi-ip>:8501` sau khi khởi chạy Streamlit.
 <div align="center">
 
 **Hackathon 2026** · Built with ❤️ on Raspberry Pi
-
-</div>
