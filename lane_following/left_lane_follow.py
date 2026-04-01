@@ -1,8 +1,10 @@
 import cv2
 import os
+import sys
 import time
-from servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
-from gpio_handle import gpio_close
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from manual_control.servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
+from manual_control.gpio_handle import gpio_close
 import numpy as np
 
 # ============ CÁC THÔNG SỐ ĐIỀU KHIỂN ============
@@ -12,8 +14,8 @@ Kd = 0.2  # Giúp xe làm dịu bớt (thắng lại) sự rung lắc
 Ki = 0.0  # Thông thường không cần dùng I (Ki = 0) cho bám làn
 
 BASE_SPEED = 120       # Tốc độ đi thẳng cơ bản (Giới hạn từ 0-500, khuyên dùng tầm 100-200)
-TARGET_X = 300         # TỌA ĐỘ X MỐC CỐ ĐỊNH (Mục tiêu của Vạch Phải, vì width=320 nên đặt vùng phải là > 160)
-SCAN_Y_RATIO = 0.65    # Vị trí dòng quét ngang - 0.75 nghĩa là quét ở tầm 3/4 chiều cao mâm ảnh (gần xe nhất)
+TARGET_LEFT = 50       # TỌA ĐỘ X MỐC CỐ ĐỊNH (Mục tiêu của Vạch Trái)
+SCAN_Y_RATIO = 0.55    # Vị trí dòng quét ngang - 0.75 nghĩa là quét ở tầm 3/4 chiều cao mâm ảnh (gần xe nhất)
 
 FRAME_WIDTH  = 320     
 FRAME_HEIGHT = 240
@@ -37,8 +39,8 @@ def drive_motor(speed, steering):
     _set_pwm(LEFT_PIN, left_us)
     _set_pwm(RIGHT_PIN, right_us)
 
-def find_right_lane(edges):
-    """ Tìm vạch phải bằng cách lấy TARGET_X làm mốc và quét lan tỏa sang 2 bên gần nhất """
+def find_left_lane(edges):
+    """ Tìm vạch trái bằng cách lấy TARGET_LEFT làm mốc và quét lan tỏa sang 2 bên gần nhất """
     height, width = edges.shape
     y = int(height * SCAN_Y_RATIO)
     line = edges[y]
@@ -47,9 +49,9 @@ def find_right_lane(edges):
     left_line = line[:mid]
     right_x = mid + np.argmax(right_line)
     left_x = mid - np.argmax(left_line[::-1])
-    if right_x < 161:
-        return len(line), y
-    return right_x, y
+    if np.argmax(left_line[::-1]) == 0:
+        return -1, y
+    return left_x, y
 
 def get_camera_frame(picam2, cap):
     if picam2:
@@ -90,7 +92,26 @@ def main():
     running = True
     stop() # Đảm bảo xe đứng yên ở điểm xuất phát
 
-    print("🚗 Bắt đầu chạy test THUẬT TOÁN PID BÁM LÀN...")
+    print("🚗 Bắt đầu chạy test THUẬT TOÁN PID BÁM LÀN TRÁI...")
+    print("📹 Preview camera. Press 's' to start lane following, 'q' to quit.")
+    
+    preview_mode = True
+    while preview_mode:
+        frame = get_camera_frame(picam2, cap)
+        if frame is None: continue
+        frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+        cv2.putText(frame, "Press 's' to start", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.imshow("Camera Preview", frame)
+        key = cv2.waitKey(10) & 0xFF
+        if key == ord('s'):
+            preview_mode = False
+        elif key == ord('q'):
+            running = False
+            preview_mode = False
+    
+    if not running:
+        return
+    
     try:
         while running:
             frame = get_camera_frame(picam2, cap)
@@ -98,11 +119,12 @@ def main():
             
             # Đưa về độ phân giải chuẩn nhỏ gọn để test PID mượt nhất
             frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, 100, 200)
 
-            # Quét dòng đơn duy nhất để tìm line phải
-            right_x, y = find_right_lane(edges)
+            # Quét dòng đơn duy nhất để tìm line trái
+            left_x, y = find_left_lane(edges)
             center_x = FRAME_WIDTH // 2
 
             # ================= SHOW TRỰC QUAN =================
@@ -111,28 +133,28 @@ def main():
             # Vẽ trục tâm xe (Màu Xanh Biển)
             cv2.line(frame, (center_x, 0), (center_x, FRAME_HEIGHT), (255, 0, 0), 1)
             # Vẽ MỐC ĐÍCH TARGET cố định (Màu Vàng) làm "điểm mốc đặt để làm threshold"
-            cv2.line(frame, (TARGET_X, y-10), (TARGET_X, y+10), (0, 255, 255), 2)
-            cv2.putText(frame, "Target", (TARGET_X-15, y-15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            cv2.line(frame, (TARGET_LEFT, y-10), (TARGET_LEFT, y+10), (0, 255, 255), 2)
+            cv2.putText(frame, "Target Left", (TARGET_LEFT-15, y-15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
             
-            if right_x != -1:
+            if left_x != -1:
                 # ------ BỘ ĐIỀU KHIỂN PID BÁM MỐC TUYỆT ĐỐI ------
-                # right_x > TARGET_X: Vạch phải nằm sau điểm mốc -> Xe đang lệch trái -> Rẽ phải (error dương)
-                # right_x < TARGET_X: Vạch phải nằm lấn sang trái điểm mốc -> Xe đang lệch về mép phải -> Rẽ trái (error âm)
-                print(right_x, y)
-                steering = - (right_x - TARGET_X) * 3
+                # left_x > TARGET_LEFT: Vạch trái nằm sau điểm mốc -> Xe đang lệch phải -> Rẽ trái (error âm)
+                # left_x < TARGET_LEFT: Vạch trái nằm lấn sang phải điểm mốc -> Xe đang lệch về mép trái -> Rẽ phải (error dương)
+                print(left_x, y)
+                steering = - (left_x - TARGET_LEFT) * 3
                 drive_motor(BASE_SPEED, steering)
                 
                 # Text Log & Draw Focus
-                cv2.circle(frame, (right_x, y), 5, (0, 255, 0), -1) # Điểm phát hiện (Xanh Lá)
+                cv2.circle(frame, (left_x, y), 5, (0, 255, 0), -1) # Điểm phát hiện (Xanh Lá)
                 cv2.putText(frame, f"Err: {steering}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
                 cv2.putText(frame, f"Steer: {int(steering)}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
             else:
-                # Trạng thái MẤT DẤU - Rẽ vòng sang phải để xoay xe dò tìm lại vạch phải
-                drive_motor(80, 80) # Tốc độ tiến 80, bù lái 80 (để xoay phải)
-                cv2.putText(frame, "Searching Right Line...", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+                # Trạng thái MẤT DẤU - Rẽ vòng sang trái để xoay xe dò tìm lại vạch trái
+                drive_motor(80, -80) # Tốc độ tiến 80, bù lái -80 (để xoay trái)
+                cv2.putText(frame, "Searching Left Line...", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
 
-            cv2.imshow("Lane Keeping - Camera", frame)
-            cv2.imshow("Lane Keeping - Edge", edges)
+            cv2.imshow("Lane Keeping Left - Camera", frame)
+            cv2.imshow("Lane Keeping Left - Edge", edges)
 
             if cv2.waitKey(10) & 0xFF == ord('q'):
                 running = False
