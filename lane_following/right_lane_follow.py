@@ -1,8 +1,10 @@
 import cv2
 import os
+import sys
 import time
-from servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
-from gpio_handle import gpio_close
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from manual_control.servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
+from manual_control.gpio_handle import gpio_close
 import numpy as np
 
 # ============ CÁC THÔNG SỐ ĐIỀU KHIỂN ============

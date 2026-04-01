@@ -1,8 +1,10 @@
 import cv2
 import os
 import time
-from servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
-from gpio_handle import gpio_close
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from manual_control.servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
+from manual_control.gpio_handle import gpio_close
 import numpy as np
 
 # ============ CÁC THÔNG SỐ ĐIỀU KHIỂN ============
@@ -119,6 +121,7 @@ def main():
         return
 
     print("🚗 Bắt đầu bám làn kết hợp (right/left).")
+    last_lane = "right"  # Mặc định
     try:
         while running:
             frame = get_camera_frame(picam2, cap)
@@ -146,10 +149,12 @@ def main():
             steering = 0
             if right_x != -1:
                 mode = "right"
+                last_lane = "right"
                 steering = - (right_x - TARGET_RIGHT) * 3
                 cv2.circle(frame, (right_x, y), 5, (0, 255, 0), -1)
             elif left_x != -1:
                 mode = "left"
+                last_lane = "left"
                 steering = - (left_x - TARGET_LEFT) * 3
                 cv2.circle(frame, (left_x, y), 5, (0, 127, 255), -1)
             else:
@@ -160,10 +165,13 @@ def main():
                 cv2.putText(frame, f"Mode: {mode} lane", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                 cv2.putText(frame, f"Steer: {int(steering)}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             else:
-                drive_motor(80, 80)
-                cv2.putText(frame, "Mode: SEARCH lane", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                cv2.putText(frame, "Searching for any lane", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                time.sleep(0.2)
+                # Xoay ngược hướng bám làn cũ
+                spin_steering = 80 if last_lane == "right" else -80
+                drive_motor(0, spin_steering)
+                cv2.putText(frame, f"Mode: SEARCH ({last_lane})", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                spin_dir = "left" if spin_steering > 0 else "right"
+                cv2.putText(frame, f"Spinning {spin_dir} to find lane", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                time.sleep(0.1)
 
             cv2.imshow("Lane following combined", frame)
             cv2.imshow("Edge", edges)
