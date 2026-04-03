@@ -3,11 +3,21 @@ import os
 import time
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from manual_control.servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
+from manual_control.servo import (
+    LEFT_PIN,
+    RIGHT_PIN,
+    STOP_L,
+    STOP_R,
+    _set_pwm,
+    get_servo_monitor_state,
+    log_servo_monitor,
+    release,
+    stop,
+)
 from manual_control.gpio_handle import gpio_close
 import numpy as np
 
-# ============ CÁC THÔNG SỐ ĐIỀU KHIỂN ============
+# ============ CONTROL PARAMETERS ============
 Kp = 0.8
 Kd = 0.2
 Ki = 0.0
@@ -24,10 +34,33 @@ FRAME_HEIGHT = 240
 
 def drive_motor(speed, steering):
     steering = max(-200, min(200, steering))
-    left_us = 1500 - speed - steering
-    right_us = 1500 + speed - steering
+    left_us = STOP_L - speed - steering
+    right_us = STOP_R + speed - steering
     _set_pwm(LEFT_PIN, left_us)
     _set_pwm(RIGHT_PIN, right_us)
+    return left_us, right_us
+
+
+def draw_servo_monitor(frame):
+    servo_state = get_servo_monitor_state()
+    cv2.putText(
+        frame,
+        f"Servo L: {servo_state['left_us']}us ({servo_state['left_duty']:.2f}%)",
+        (10, 60),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 0),
+        1,
+    )
+    cv2.putText(
+        frame,
+        f"Servo R: {servo_state['right_us']}us ({servo_state['right_duty']:.2f}%)",
+        (10, 80),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 0),
+        1,
+    )
 
 
 def find_left_lane(edges):
@@ -91,13 +124,13 @@ def main():
             cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
     if not picam2 and (not cap or not cap.isOpened()):
-        print("❌ Cannot open camera")
+        print("Cannot open camera")
         return
 
     running = True
-    stop()
+    release()
 
-    print("📹 Bật preview camera. Nhấn 's' để bắt đầu bám làn, 'q' để thoát.")
+    print("Camera preview started. Press 's' to start lane following, 'q' to quit.")
     preview_mode = True
 
     while preview_mode and running:
@@ -109,6 +142,7 @@ def main():
         cv2.imshow("Camera Preview", frame)
         key = cv2.waitKey(10) & 0xFF
         if key == ord('s'):
+            stop(hold_seconds=0.2, release=False)
             preview_mode = False
         elif key == ord('q'):
             running = False
@@ -117,11 +151,11 @@ def main():
     cv2.destroyWindow("Camera Preview")
 
     if not running:
-        print("❌ Kết thúc do người dùng yêu cầu.")
+        print("Stopped by user request.")
         return
 
-    print("🚗 Bắt đầu bám làn kết hợp (right/left).")
-    last_lane = "right"  # Mặc định
+    print("Starting combined lane following (right/left).")
+    last_lane = "right"  # Default search direction
     try:
         while running:
             frame = get_camera_frame(picam2, cap)
@@ -164,15 +198,18 @@ def main():
                 drive_motor(BASE_SPEED, steering)
                 cv2.putText(frame, f"Mode: {mode} lane", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                 cv2.putText(frame, f"Steer: {int(steering)}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                log_servo_monitor(prefix=f"lane_following:{mode}")
             else:
-                # Xoay ngược hướng bám làn cũ
+                # Spin opposite to the last tracked lane direction
                 spin_steering = 80 if last_lane == "right" else -80
                 drive_motor(0, spin_steering)
                 cv2.putText(frame, f"Mode: SEARCH ({last_lane})", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                 spin_dir = "left" if spin_steering > 0 else "right"
                 cv2.putText(frame, f"Spinning {spin_dir} to find lane", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                log_servo_monitor(prefix=f"lane_following:search-{last_lane}")
                 time.sleep(0.1)
 
+            draw_servo_monitor(frame)
             cv2.imshow("Lane following combined", frame)
             cv2.imshow("Edge", edges)
 
@@ -184,8 +221,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        print("🛑 Dừng xe và giải phóng tài nguyên...")
-        stop()
+        print("Stopping the car and releasing resources...")
+        stop(hold_seconds=0.2, release=True)
         gpio_close()
         if picam2:
             picam2.stop()
