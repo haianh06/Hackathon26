@@ -3,17 +3,29 @@ import os
 import sys
 import time
 import math
+import cv2
+
+@st.cache_resource
+def get_camera_manager():
+    """Persistent camera manager instance."""
+    from hardware.camera import camera_manager
+    camera_manager.start()
+    return camera_manager
 
 try:
     from hardware.rfid import RFIDReader
     from config.graph_data import TURN_CONFIG
     from autonomous_main import AutonomousCar
+    import hardware.motor as motor
     import importlib
     import sys
     import threading
     HAS_HW = True
     HAS_RFID = True
-except Exception:
+    # Initial trigger to ensure manager is ready
+    _ = get_camera_manager()
+except Exception as e:
+    print(f"Hardware init warning: {e}")
     HAS_HW = False
     HAS_RFID = False
 
@@ -49,6 +61,9 @@ if "path_cost" not in st.session_state:
 
 if "click_step" not in st.session_state:
     st.session_state.click_step = 0
+
+if "manual_last_cmd" not in st.session_state:
+    st.session_state.manual_last_cmd = "STOP"
 
 # RFID pin wizard state
 if "rfid_pending" not in st.session_state:
@@ -97,6 +112,30 @@ def _save_turn_config(cfg: dict):
 if "turn_config" not in st.session_state:
     st.session_state.turn_config = _load_turn_config()
 
+# ── Camera Feed (Always Visible) ──────────────────────────────────────────────
+if HAS_HW:
+    with st.container(border=True):
+        cam_col1, cam_col2 = st.columns([2, 1])
+        with cam_col1:
+            # Prioritize showing the debug frame from the car instance (with overlays)
+            frame = None
+            if st.session_state.get("car_instance"):
+                frame = getattr(st.session_state.car_instance, 'debug_frame', None)
+            
+            if frame is None:
+                frame = get_camera_manager().get_frame() if HAS_HW else None
+            
+            if frame is not None:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                st.image(rgb, caption="Live Camera Feed", width='stretch')
+            else:
+                st.info("Chờ Camera khởi động...")
+        with cam_col2:
+            st.markdown("### 🚦 Status")
+            st.metric("Vehicle Mode", "Autonomous" if st.session_state.get("car_instance") and st.session_state.car_instance.is_active else "Standby")
+            if st.button("🔄 Refresh Stream"):
+                st.rerun()
+
 # ─────────────────────────────────────────────────────────────────────────────
 gm: GraphManager = st.session_state.graph_manager
 sim: RFIDSimulator = st.session_state.simulator
@@ -116,7 +155,7 @@ col3.metric(
 )
 
 
-tab1, tab2 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)"])
+tab1, tab2, tab3 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)", "🎮 Điều Khiển WASD"])
 
 with tab2:
     st.header("⚙️ Calibration — Tốc độ & Thời gian Rẽ")
@@ -166,7 +205,7 @@ with tab2:
                 help="Thời gian motor rẽ để xe quay đúng 90 độ"
             )
             t_col1, t_col2 = st.columns(2)
-            if t_col1.button("⬅️ Test Rẽ Trái 90°", use_container_width=True):
+            if t_col1.button("⬅️ Test Rẽ Trái 90°", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_left()
@@ -175,7 +214,7 @@ with tab2:
                     st.success(f"Rẽ trái {new_90}s xong.")
                 else:
                     st.warning("Không có HW.")
-            if t_col2.button("➡️ Test Rẽ Phải 90°", use_container_width=True):
+            if t_col2.button("➡️ Test Rẽ Phải 90°", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_right()
@@ -196,7 +235,7 @@ with tab2:
                 help="Thời gian motor rẽ để xe quay đúng 45 độ"
             )
             t_col3, t_col4 = st.columns(2)
-            if t_col3.button("⬅️ Test Rẽ Trái 45°", use_container_width=True):
+            if t_col3.button("⬅️ Test Rẽ Trái 45°", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_left()
@@ -205,7 +244,7 @@ with tab2:
                     st.success(f"Rẽ trái {new_45}s xong.")
                 else:
                     st.warning("Không có HW.")
-            if t_col4.button("➡️ Test Rẽ Phải 45°", use_container_width=True):
+            if t_col4.button("➡️ Test Rẽ Phải 45°", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_right()
@@ -216,7 +255,7 @@ with tab2:
                     st.warning("Không có HW.")
 
     st.write("")
-    if st.button("💾 Lưu Cấu Hình Rẽ", type="primary", use_container_width=True):
+    if st.button("💾 Lưu Cấu Hình Rẽ", type="primary", width='stretch'):
         new_cfg = {"90_DEG": new_90, "45_DEG": new_45}
         _save_turn_config(new_cfg)
         st.session_state.turn_config = new_cfg
@@ -257,7 +296,7 @@ with tab1:
             st.write("")
             st.write("")
             if HAS_RFID:
-                if st.button("💳 Quét (5s)", use_container_width=True):
+                if st.button("💳 Quét (5s)", width='stretch'):
                     with st.spinner("Chờ thẻ..."):
                         reader = get_rfid_reader()
                         try:
@@ -270,7 +309,7 @@ with tab1:
                         except Exception as e:
                             st.error(f"Lỗi: {e}")
             else:
-                st.button("💳 Quét (Tắt)", disabled=True, use_container_width=True)
+                st.button("💳 Quét (Tắt)", disabled=True, width='stretch')
 
         id_ok = bool(scanned_id and scanned_id.strip())
         label_ok = bool(scanned_label and scanned_label.strip())
@@ -285,7 +324,7 @@ with tab1:
                     "🔒 Khóa thông tin → Nhấp Map để ghim",
                     disabled=lock_disabled,
                     help=lock_help,
-                    use_container_width=True,
+                    width='stretch',
                     type="primary"
                 ):
                     uid_clean = scanned_id.strip()
@@ -298,7 +337,7 @@ with tab1:
                         }
                         st.rerun()
             else:
-                if st.button("✖️ Hủy ghim", use_container_width=True):
+                if st.button("✖️ Hủy ghim", width='stretch'):
                     st.session_state.rfid_pending = None
                     st.rerun()
 
@@ -319,7 +358,7 @@ with tab1:
         upd_id = upd_col1.text_input("UID thẻ tại vị trí xe hiện tại:", placeholder="Nhập UID hex...")
         upd_col2.write("")
         upd_col2.write("")
-        if upd_col2.button("Cập nhật", use_container_width=True):
+        if upd_col2.button("Cập nhật", width='stretch'):
             if sim.force_scan(upd_id):
                 st.success("✅ Cập nhật vị trí xe thành công!")
                 time.sleep(0.5)
@@ -403,7 +442,7 @@ with tab1:
                 if st.button(
                     "🔀 Tính Lộ Trình Tối Ưu",
                     disabled=btn_disabled,
-                    use_container_width=True,
+                    width='stretch',
                     type="primary",
                     help="Cần chọn điểm xuất phát và ít nhất 1 điểm ghé thăm"
                 ):
@@ -439,7 +478,7 @@ with tab1:
                         sim.start_route(full_path)
                         st.rerun()
 
-                if st.button("🔄 Reset Multi-Stop", use_container_width=True):
+                if st.button("🔄 Reset Multi-Stop", width='stretch'):
                     st.session_state.multi_start = None
                     st.session_state.multi_waypoints = []
                     st.session_state.tour_visit_order = []
@@ -473,7 +512,7 @@ with tab1:
     )
 
     try:
-        selection = st.plotly_chart(fig, on_select="rerun", selection_mode="points", use_container_width=True)
+        selection = st.plotly_chart(fig, on_select="rerun", selection_mode="points", width='stretch')
         if selection and hasattr(selection, "selection") and "points" in selection.selection:
             pts = selection.selection["points"]
             if pts and click_action != "Không làm gì":
@@ -562,7 +601,7 @@ with tab1:
                         st.rerun()
 
     except TypeError:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # ──────────────────────────────────────────────
     # SECTION 2: Node Management Table
@@ -595,11 +634,11 @@ with tab1:
                         ec4.write("")
                         ec4.write("")
                         sv, cn = st.columns(2)
-                        if sv.button("💾 Lưu", key=f"save_{node_id}", use_container_width=True, type="primary"):
+                        if sv.button("💾 Lưu", key=f"save_{node_id}", width='stretch', type="primary"):
                             gm.edit_node(node_id, new_x, new_y, new_label)
                             st.session_state.editing_node = None
                             st.rerun()
-                        if cn.button("✖️ Hủy", key=f"cancel_{node_id}", use_container_width=True):
+                        if cn.button("✖️ Hủy", key=f"cancel_{node_id}", width='stretch'):
                             st.session_state.editing_node = None
                             st.rerun()
                 else:
@@ -765,52 +804,73 @@ with tab1:
                 else:
                     st.warning("Xe chưa khởi động hoặc đã mất kết nối.")
 
-            st.markdown("### 📷 Camera Trực Tiếp")
-            enable_cam = st.checkbox("Bật Streaming Camera (Theo dõi Real-time)", value=False)
-            
-            if enable_cam:
-                try:
-                    import cv2
-                    if "camera_cap" not in st.session_state:
-                        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-                        st.session_state.camera_cap = cap
-                    
-                    cap = st.session_state.camera_cap
-                    if cap and cap.isOpened():
-                        ret, frame = cap.read()
-                        if ret:
-                            cam_col1, cam_col2 = st.columns(2)
-                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            cam_col1.image(rgb, caption="Cam Thường", use_container_width=True)
-                            cam_col2.image(gray, caption="Cam Trắng Đen", use_container_width=True)
-                        else:
-                            st.error("Lỗi đọc frame từ Camera")
-                    else:
-                        st.warning("Không tìm thấy Camera vật lý (Index 0)")
-                except Exception as e:
-                    st.error(f"Lỗi Camera: {e}")
-            else:
-                if "camera_cap" in st.session_state:
-                    st.session_state.camera_cap.release()
-                    del st.session_state.camera_cap
-
             st.markdown("### 📝 Live Console Logs")
-            log_box = st.empty()
-            log_history = []
+            log_container = st.empty()
             if 'car_instance' in st.session_state:
-                log_history = getattr(st.session_state.car_instance, 'log_history', [])
+                logs = st.session_state.car_instance.log_history
+                log_container.code("\n".join(logs) if logs else "No logs yet...")
+            else:
+                log_container.info("Logs will appear here when route starts.")
 
-            log_box.code("\n".join(log_history) if log_history else "Chưa có log hệ thống.")
+with tab3:
+    st.header("🎮 Điều Khiển Thủ Công (WASD)")
+    st.info("Sử dụng các phím **W, A, S, D** trên bàn phím hoặc các nút bên dưới để điều khiển xe.")
+    
+    # Simple WASD layout
+    cw1, cw2, cw3 = st.columns([1, 1, 1])
+    with cw2:
+        if st.button("🔼 W (Tiến)", width='stretch'):
+            st.session_state.manual_last_cmd = "FORWARD"
+            if HAS_HW: motor.move_straight()
+    
+    cl1, cl2, cl3 = st.columns([1, 1, 1])
+    with cl1:
+        if st.button("◀️ A (Trái)", width='stretch'):
+            st.session_state.manual_last_cmd = "LEFT"
+            if HAS_HW: motor.turn_left()
+    with cl2:
+        if st.button("⏹️ S (Dừng)", width='stretch'):
+            st.session_state.manual_last_cmd = "STOP"
+            if HAS_HW: motor.stop()
+    with cl3:
+        if st.button("▶️ D (Phải)", width='stretch'):
+            st.session_state.manual_last_cmd = "RIGHT"
+            if HAS_HW: motor.turn_right()
 
-            car_alive = 'car_thread' in st.session_state and st.session_state.car_thread.is_alive()
-            is_streaming = locals().get('enable_cam', False)
-            
-            if car_alive or is_streaming:
-                if car_alive and 'car_instance' in st.session_state and getattr(st.session_state.car_instance, 'current_node', None):
-                    sim.force_scan(st.session_state.car_instance.current_node)
-                
-                time.sleep(0.2 if is_streaming else 0.5)
-                st.rerun()
+    # JS for WASD listener
+    js_code = """
+    <script>
+    document.addEventListener('keydown', function(e) {
+        const key = e.key.toLowerCase();
+        let cmd = "";
+        if (key === 'w') cmd = "FORWARD";
+        else if (key === 'a') cmd = "LEFT";
+        else if (key === 's') cmd = "STOP";
+        else if (key === 'd') cmd = "RIGHT";
+        
+        if (cmd) {
+            // Find the button and click it to trigger Streamlit's backend
+            const buttons = window.parent.document.querySelectorAll('button');
+            for (let btn of buttons) {
+                if (btn.innerText.includes(key.toUpperCase())) {
+                    btn.click();
+                    break;
+                }
+            }
+        }
+    });
+    </script>
+    """
+    st.html(js_code)
+
+    st.divider()
+    st.write(f"Lệnh cuối cùng: **{st.session_state.manual_last_cmd}**")
+
+# ── Auto-refresh Logic ────────────────────────────────────────────────────────
+car_alive = 'car_thread' in st.session_state and st.session_state.car_thread.is_alive()
+if car_alive or HAS_HW:
+    if car_alive and 'car_instance' in st.session_state and getattr(st.session_state.car_instance, 'current_node', None):
+        sim.force_scan(st.session_state.car_instance.current_node)
+    
+    time.sleep(0.5)
+    st.rerun()

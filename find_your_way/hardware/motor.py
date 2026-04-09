@@ -38,6 +38,18 @@ def turn_left():
     _set_pwm(LEFT_PIN, STOP_VAL - TURN_SPEED)
     _set_pwm(RIGHT_PIN, STOP_VAL - TURN_SPEED)
 
+def drive(speed, steering):
+    """
+    Drive with proportional steering.
+    speed: base speed (0-400)
+    steering: steering offset (-200 to 200)
+    """
+    steering = max(-200, min(200, steering))
+    left_us = STOP_VAL - speed - steering
+    right_us = STOP_VAL + speed - steering
+    _set_pwm(LEFT_PIN, left_us)
+    _set_pwm(RIGHT_PIN, right_us)
+
 def stop():
     _set_pwm(LEFT_PIN, 0)
     _set_pwm(RIGHT_PIN, 0)

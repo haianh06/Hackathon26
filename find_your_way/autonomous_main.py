@@ -3,6 +3,9 @@ from enum import Enum, auto
 from core.navigation import NavEngine
 from hardware.rfid import RFIDReader
 import hardware.motor as motor
+import cv2
+import numpy as np
+from hardware.camera import camera_manager
 
 class CarState(Enum):
     IDLE = auto()
@@ -25,6 +28,13 @@ class AutonomousCar:
         self._rfid = None
         self.is_active = False
         self.log_history = []          # Live console logs for the web UI
+        self.last_lane = "right"       # Memory for search direction
+        self.base_speed = 120
+        self.target_right = 300
+        self.target_left = 50
+        self.scan_y_left = 0.55
+        self.scan_y_right = 0.75
+        self.debug_frame = None        # Stores visualized frame for the UI
 
     @property
     def rfid(self):
@@ -96,7 +106,121 @@ class AutonomousCar:
             self.state = CarState.MOVING
 
         elif self.state == CarState.MOVING:
+            self.follow_lane()
+
+    def follow_lane(self):
+        raw_frame = camera_manager.get_frame()
+        if raw_frame is None:
             motor.move_straight()
+            return
+
+        # Resize for CV processing (320x240 is efficient)
+        frame = cv2.resize(raw_frame, (320, 240))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 100, 200)
+
+        left_x, y_left = self._find_left_lane(edges)
+        right_x, y_right = self._find_right_lane(edges)
+
+        # --- Visualization Logic (HD) ---
+        display_frame = frame.copy()
+        self._draw_lane_overlay(display_frame, left_x, y_left, right_x, y_right)
+        
+        # Metadata drawings
+        cv2.line(display_frame, (0, y_left), (320, y_left), (80, 80, 80), 1)
+        cv2.line(display_frame, (0, y_right), (320, y_right), (60, 60, 60), 1)
+        cv2.line(display_frame, (160, 0), (160, 240), (200, 200, 200), 1)
+
+        # Target markers
+        for tx, label in [(self.target_left, "TL"), (self.target_right, "TR")]:
+            cv2.line(display_frame, (tx, y_left-10), (tx, y_left+10), (0, 255, 255), 2)
+            cv2.putText(display_frame, label, (tx-10, y_left-14), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+
+        if left_x != -1:
+            cv2.circle(display_frame, (left_x, y_left), 6, (0, 140, 255), -1)
+        if right_x != -1:
+            cv2.circle(display_frame, (right_x, y_right), 6, (255, 80, 0), -1)
+
+        steering = 0
+        mode = "search"
+        if right_x != -1:
+            mode = "right"
+            self.last_lane = "right"
+            steering = -(right_x - self.target_right) * 3
+        elif left_x != -1:
+            mode = "left"
+            self.last_lane = "left"
+            steering = -(left_x - self.target_left) * 3
+        
+        # HUD Orientation Mark
+        self._draw_orientation_mark(display_frame, steering)
+        cv2.putText(display_frame, f"Mode: {mode}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 255, 80), 1)
+        
+        # Update debug frame for Streamlit
+        self.debug_frame = display_frame
+
+        # Motor control
+        if mode in ["right", "left"]:
+            motor.drive(self.base_speed, steering)
+        else:
+            spin_steering = 80 if self.last_lane == "right" else -80
+            motor.drive(0, spin_steering)
+            time.sleep(0.05)
+
+    def _draw_lane_overlay(self, frame, left_x, y_left, right_x, y_right):
+        overlay = frame.copy()
+        h, w = frame.shape[:2]
+        bot = h
+        if left_x != -1 and right_x != -1:
+            pts = np.array([[left_x, y_left], [right_x, y_right], [right_x, bot], [left_x, bot]], dtype=np.int32)
+            cv2.fillPoly(overlay, [pts], (0, 200, 80))
+            cv2.addWeighted(overlay, 0.30, frame, 0.70, 0, frame)
+            cv2.line(frame, (left_x, y_left), (left_x, bot), (0, 140, 255), 2)
+            cv2.line(frame, (right_x, y_right), (right_x, bot), (255, 80, 0), 2)
+        elif left_x != -1:
+            cv2.line(frame, (left_x, y_left), (left_x, bot), (0, 140, 255), 2)
+        elif right_x != -1:
+            cv2.line(frame, (right_x, y_right), (right_x, bot), (255, 80, 0), 2)
+
+    def _draw_orientation_mark(self, frame, steering):
+        h, w = frame.shape[:2]
+        base_y = int(h * 0.85)
+        cx = w // 2
+        max_steer = 200
+        clamped = max(-max_steer, min(max_steer, steering))
+        arrow_len = int((clamped / max_steer) * (w // 4))
+        tip_x = cx + arrow_len
+        cv2.rectangle(frame, (cx - w // 4, base_y - 10), (cx + w // 4, base_y + 10), (30, 30, 30), -1)
+        cv2.line(frame, (cx, base_y), (tip_x, base_y), (0, 255, 255), 2)
+        if arrow_len != 0:
+            cv2.arrowedLine(frame, (cx, base_y), (tip_x, base_y), (0, 255, 255), 2, tipLength=0.3)
+
+    def _find_left_lane(self, edges):
+        height, width = edges.shape
+        y = int(height * self.scan_y_left)
+        line = edges[y]
+        mid = len(line) // 2
+        left_half = line[:mid]
+        if left_half.sum() == 0:
+            return -1, y
+        inner_x = mid - 1 - np.argmax(left_half[::-1])
+        if inner_x <= 0:
+            return -1, y
+        return inner_x, y
+
+    def _find_right_lane(self, edges):
+        height, width = edges.shape
+        y = int(height * self.scan_y_right)
+        line = edges[y]
+        mid = len(line) // 2
+        right_half = line[mid:]
+        if right_half.sum() == 0:
+            return -1, y
+        inner_x = mid + np.argmax(right_half)
+        if inner_x >= width - 1:
+            return -1, y
+        return inner_x, y
 
     def execute_motor_action(self, action):
         if action == "RIGHT":
