@@ -64,6 +64,5 @@ RFID_MAP = {
 }
 
 TURN_CONFIG = {
-    "90_DEG": 0.8,
-    "45_DEG": 0.5
+    "90_DEG": 1.5
 }

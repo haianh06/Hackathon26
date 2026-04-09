@@ -134,7 +134,7 @@ python3 -m venv venv --system-site-packages
 source venv/bin/activate
 
 # Cài thư viện Python
-pip install numpy pandas streamlit picamera2 opencv-python pygame
+pip install numpy pandas streamlit picamera2 opencv-python pygame networkx plotly
 ```
 
 > **Lưu ý:** Nếu gặp lỗi `externally-managed-environment`, thêm flag `--break-system-packages` khi chạy pip.
