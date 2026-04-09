@@ -2,16 +2,14 @@ import cv2
 import os
 import time
 import sys
-import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from manual_control.servo import _set_pwm, stop, LEFT_PIN, RIGHT_PIN
 from manual_control.gpio_handle import gpio_close
 import numpy as np
 
 # ============ CÁC THÔNG SỐ ĐIỀU KHIỂN ============
-# Bạn có thể tuning nhẹ lại Kp, Kd nếu xe đánh lái gắt quá.
-Kp = 3.0   
-Kd = 1.5   
+Kp = 0.8
+Kd = 0.2
 Ki = 0.0
 
 BASE_SPEED = 120
@@ -33,29 +31,129 @@ def drive_motor(speed, steering):
 
 
 def find_left_lane(edges):
+    """Tìm điểm trong (inner edge) của lane trái – điểm sát giữa nhất."""
     height, width = edges.shape
     y = int(height * SCAN_Y_RATIO_left)
     line = edges[y]
     mid = len(line) // 2
-    left_line = line[:mid]
-    non_zeros = np.nonzero(left_line)[0]
-    if len(non_zeros) == 0:
+    left_half = line[:mid]
+    if left_half.sum() == 0:
         return -1, y
-    left_x = int(np.mean(non_zeros)) # Bắt trung bình cộng vạch đường thay vì điểm cạnh
-    return left_x, y
+    # Quét từ giữa ra ngoài → lấy điểm trong nhất
+    inner_x = mid - 1 - np.argmax(left_half[::-1])
+    if inner_x <= 0:
+        return -1, y
+    return inner_x, y
 
 
 def find_right_lane(edges):
+    """Tìm điểm trong (inner edge) của lane phải – điểm sát giữa nhất."""
     height, width = edges.shape
     y = int(height * SCAN_Y_RATIO_right)
     line = edges[y]
     mid = len(line) // 2
-    right_line = line[mid:]
-    non_zeros = np.nonzero(right_line)[0]
-    if len(non_zeros) == 0:
+    right_half = line[mid:]
+    if right_half.sum() == 0:
         return -1, y
-    right_x = mid + int(np.mean(non_zeros)) # Bắt chính giữa dải băng đường
-    return right_x, y
+    # Quét từ giữa ra ngoài → lấy điểm trong nhất
+    inner_x = mid + np.argmax(right_half)
+    if inner_x >= width - 1:
+        return -1, y
+    return inner_x, y
+
+
+def draw_lane_overlay(frame, left_x, y_left, right_x, y_right):
+    """Tô màu vùng lane giữa hai điểm detect được."""
+    overlay = frame.copy()
+    h, w = frame.shape[:2]
+    bot = h  # kéo xuống đáy frame
+
+    if left_x != -1 and right_x != -1:
+        # Tô vùng lane giữa hai line
+        pts = np.array([
+            [left_x,  y_left],
+            [right_x, y_right],
+            [right_x, bot],
+            [left_x,  bot],
+        ], dtype=np.int32)
+        cv2.fillPoly(overlay, [pts], (0, 200, 80))   # xanh lá nhạt
+        cv2.addWeighted(overlay, 0.30, frame, 0.70, 0, frame)
+
+        # Vẽ đường line trái (màu cam)
+        cv2.line(frame, (left_x, y_left), (left_x, bot), (0, 140, 255), 2)
+        # Vẽ đường line phải (màu xanh dương)
+        cv2.line(frame, (right_x, y_right), (right_x, bot), (255, 80, 0), 2)
+
+    elif left_x != -1:
+        # Chỉ có lane trái
+        cv2.line(frame, (left_x, y_left), (left_x, bot), (0, 140, 255), 2)
+        pts = np.array([
+            [left_x, y_left],
+            [w // 2, y_left],
+            [w // 2, bot],
+            [left_x, bot],
+        ], dtype=np.int32)
+        cv2.fillPoly(overlay, [pts], (0, 140, 255))
+        cv2.addWeighted(overlay, 0.20, frame, 0.80, 0, frame)
+
+    elif right_x != -1:
+        # Chỉ có lane phải
+        cv2.line(frame, (right_x, y_right), (right_x, bot), (255, 80, 0), 2)
+        pts = np.array([
+            [w // 2, y_right],
+            [right_x, y_right],
+            [right_x, bot],
+            [w // 2, bot],
+        ], dtype=np.int32)
+        cv2.fillPoly(overlay, [pts], (255, 80, 0))
+        cv2.addWeighted(overlay, 0.20, frame, 0.80, 0, frame)
+
+
+def draw_orientation_mark(frame, steering, base_y=None):
+    """Vẽ mũi tên hướng steering (orientation mark) ở dưới frame."""
+    h, w = frame.shape[:2]
+    if base_y is None:
+        base_y = int(h * 0.82)
+    cx = w // 2
+
+    # Clamp và scale độ lệch thành độ dài mũi tên
+    max_steer = 200
+    clamped = max(-max_steer, min(max_steer, steering))
+    arrow_len = int((clamped / max_steer) * (w // 4))
+    tip_x = cx + arrow_len
+
+    # Màu: xanh lá khi thẳng, vàng cam khi lệch nhiều
+    ratio = abs(clamped) / max_steer
+    color = (
+        int(50 + ratio * 200),       # B
+        int(230 - ratio * 150),      # G
+        int(ratio * 255),            # R  → BGR
+    )
+
+    # Vẽ nền mờ cho HUD
+    bar_h = 28
+    cv2.rectangle(frame,
+                  (cx - w // 4, base_y - bar_h // 2),
+                  (cx + w // 4, base_y + bar_h // 2),
+                  (30, 30, 30), -1)
+    # Scale bar
+    cv2.rectangle(frame,
+                  (cx, base_y - bar_h // 4),
+                  (tip_x, base_y + bar_h // 4),
+                  color, -1)
+    # Vẽ mũi tên
+    if arrow_len != 0:
+        cv2.arrowedLine(frame,
+                        (cx, base_y),
+                        (tip_x, base_y),
+                        color, 2, tipLength=0.35)
+    # Đường trung tâm
+    cv2.line(frame, (cx, base_y - bar_h // 2), (cx, base_y + bar_h // 2),
+             (200, 200, 200), 1)
+    # Label
+    label = f"Steer: {int(steering):+d}"
+    cv2.putText(frame, label, (cx - w // 4, base_y - bar_h // 2 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1)
 
 
 def get_camera_frame(picam2, cap):
@@ -97,7 +195,7 @@ def main():
     running = True
     stop()
 
-    print("📹 Bật preview camera. Nhấn 'Space' để bắt đầu bám làn, 'q' để thoát.")
+    print("📹 Bật preview camera. Nhấn 's' để bắt đầu bám làn, 'q' để thoát.")
     preview_mode = True
 
     while preview_mode and running:
@@ -105,10 +203,10 @@ def main():
         if frame is None:
             continue
         frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        cv2.putText(frame, "Press 'Space' to start", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, "Press 's' to start", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.imshow("Camera Preview", frame)
         key = cv2.waitKey(10) & 0xFF
-        if key == 32: # Space
+        if key == ord('s'):
             preview_mode = False
         elif key == ord('q'):
             running = False
@@ -120,14 +218,8 @@ def main():
         print("❌ Kết thúc do người dùng yêu cầu.")
         return
 
-    print("🚗 Bắt đầu bám làn (RUNNING).")
-    
-    # --- Khởi tạo State Machine & Variables ---
-    car_state = "RUNNING"
-    last_lane = "right"  # Mặc định xoay phía này khi mất cả 2 làn ngay từ đầu
-    prev_error = 0
-    # ----------------------------------------
-    
+    print("🚗 Bắt đầu bám làn kết hợp (right/left).")
+    last_lane = "right"  # Mặc định
     try:
         while running:
             frame = get_camera_frame(picam2, cap)
@@ -135,122 +227,76 @@ def main():
                 continue
 
             frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-            
-            # Đọc phím bấm (waitKeyEx bắt được các phím mũi tên)
-            key = cv2.waitKeyEx(1)
-            
-            if key in [ord('q'), ord('Q')]:
-                running = False
-                break
-            elif key == 32: # Space
-                if car_state in ["PAUSED", "MANUAL"]:
-                    car_state = "RUNNING"
-                    print("▶️ Đã TRỞ LẠI trạng thái TỰ ĐỘNG BÁM LÀN (RUNNING)")
-                else:
-                    car_state = "PAUSED"
-                    drive_motor(0, 0)
-                    print("⏸ Đã TẠM DỪNG (PAUSED)")
-            elif key in [ord('s'), ord('S')]: # Screenshot
-                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(os.path.dirname(__file__), f"screenshot_{ts}.jpg")
-                cv2.imwrite(filename, frame)
-                print(f"📸 Đã lưu khung hình: {filename}")
-            
-            # --- Các lệnh điểu khiển Manual Override ---
-            elif key in [65362, 82, ord('w'), ord('W')]: # Lên / W
-                car_state = "MANUAL"
-                drive_motor(BASE_SPEED, 0)
-                time.sleep(0.05)
-                drive_motor(0, 0)
-            elif key in [65361, 81, ord('a'), ord('A')]: # Trái / A
-                car_state = "MANUAL"
-                drive_motor(0, 80) # Xoay trái
-                time.sleep(0.05)
-                drive_motor(0, 0)
-            elif key in [65363, 83, ord('d'), ord('D')]: # Phải / D
-                car_state = "MANUAL"
-                drive_motor(0, -80) # Xoay phải
-                time.sleep(0.05)
-                drive_motor(0, 0)
-                
-            # Nếu đang ở chế độ MANUAL / PAUSED thì hiển thị trạng thái và cấm code auto bám làn chạy
-            if car_state in ["PAUSED", "MANUAL"]:
-                display_text = "PAUSED" if car_state == "PAUSED" else "MANUAL OVERRIDE"
-                cv2.putText(frame, f"{display_text} (Space to Auto)", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                cv2.imshow("Lane following combined", frame)
-                continue
-
-            # ==========================================
-            #   BƯỚC NÀY CHỈ CHẠY KHI car_state == "RUNNING"
-            # ==========================================
-            
-            # Cắt ảnh làm đen nửa trên (ROI - Region of Interest) để loại bỏ nhiễu
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            roi_top = FRAME_HEIGHT // 2  # Chỉ giữ lại 1/2 khung hình từ dưới lên
-            gray[0:roi_top, :] = 0
-            
-            # Lọc nhiễu Gaussian để tránh hột trên thảm/sàn nhà
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            
-            # Dò tìm góc cạnh (Canny)
             edges = cv2.Canny(blurred, 100, 200)
 
-            # Tìm tọa độ đường trên dòng quét cố định
             left_x, y_left = find_left_lane(edges)
             right_x, y_right = find_right_lane(edges)
             y = y_left
 
-            # Vẽ UI hỗ trợ debug
-            cv2.line(frame, (0, y), (FRAME_WIDTH, y), (80, 80, 80), 1)
-            center_x = FRAME_WIDTH // 2
-            cv2.line(frame, (center_x, 0), (center_x, FRAME_HEIGHT), (255, 0, 0), 1)
-            
-            cv2.line(frame, (TARGET_LEFT, y-10), (TARGET_LEFT, y+10), (0, 255, 255), 2)
-            cv2.putText(frame, "Target Left", (TARGET_LEFT-30, y-15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-            
-            cv2.line(frame, (TARGET_RIGHT, y-10), (TARGET_RIGHT, y+10), (0, 255, 255), 2)
-            cv2.putText(frame, "Target Right", (TARGET_RIGHT-40, y-15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            # --- Tô màu vùng lane và vẽ line ---
+            draw_lane_overlay(frame, left_x, y_left, right_x, y_right)
 
-            # Khởi tạo thông số controller
+            # --- Scan line & guide lines ---
+            cv2.line(frame, (0, y_left), (FRAME_WIDTH, y_left), (80, 80, 80), 1)
+            cv2.line(frame, (0, y_right), (FRAME_WIDTH, y_right), (60, 60, 60), 1)
+            center_x = FRAME_WIDTH // 2
+            cv2.line(frame, (center_x, 0), (center_x, FRAME_HEIGHT), (200, 200, 200), 1)
+
+            # --- Target markers ---
+            for tx, label in [(TARGET_LEFT, "TL"), (TARGET_RIGHT, "TR")]:
+                cv2.line(frame, (tx, y-10), (tx, y+10), (0, 255, 255), 2)
+                cv2.putText(frame, label, (tx-10, y-14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+
+            # --- Điểm inner edge (vẽ sau overlay để nổi bật) ---
+            if left_x != -1:
+                cv2.circle(frame, (left_x, y_left), 6, (0, 140, 255), -1)
+                cv2.circle(frame, (left_x, y_left), 8, (255, 255, 255), 1)
+                cv2.putText(frame, f"L:{left_x}", (left_x + 6, y_left - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 180, 255), 1)
+            if right_x != -1:
+                cv2.circle(frame, (right_x, y_right), 6, (255, 80, 0), -1)
+                cv2.circle(frame, (right_x, y_right), 8, (255, 255, 255), 1)
+                cv2.putText(frame, f"R:{right_x}", (right_x - 40, y_right - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 120, 0), 1)
+
             mode = "No lane"
             steering = 0
-            
-            # Áp dụng bộ điều khiển PD (Proportional - Derivative)
             if right_x != -1:
                 mode = "right"
                 last_lane = "right"
-                error = right_x - TARGET_RIGHT
-                steering = - (Kp * error + Kd * (error - prev_error))
-                prev_error = error
-                cv2.circle(frame, (right_x, y), 5, (0, 255, 0), -1)
-                
+                steering = -(right_x - TARGET_RIGHT) * 3
             elif left_x != -1:
                 mode = "left"
                 last_lane = "left"
-                error = left_x - TARGET_LEFT
-                steering = - (Kp * error + Kd * (error - prev_error))
-                prev_error = error
-                cv2.circle(frame, (left_x, y), 5, (0, 127, 255), -1)
-                
+                steering = -(left_x - TARGET_LEFT) * 3
             else:
                 mode = "search"
-                prev_error = 0 # reset error chống tích lũy nhiễu đạo hàm 
+
+            # --- Orientation mark (steering arrow HUD) ---
+            draw_orientation_mark(frame, steering)
 
             if mode in ["right", "left"]:
                 drive_motor(BASE_SPEED, steering)
-                cv2.putText(frame, f"Mode: {mode} lane", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                cv2.putText(frame, f"Steer: {int(steering)}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(frame, f"Mode: {mode} lane", (10, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 255, 80), 1)
             else:
-                # Xoay ngược hướng bám làn cũ khi mất dấu
                 spin_steering = 80 if last_lane == "right" else -80
                 drive_motor(0, spin_steering)
-                cv2.putText(frame, f"Mode: SEARCH ({last_lane})", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 spin_dir = "left" if spin_steering > 0 else "right"
-                cv2.putText(frame, f"Spinning {spin_dir} to find lane", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                cv2.putText(frame, f"SEARCH ({spin_dir})", (10, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 80, 255), 1)
+                time.sleep(0.1)
 
-            # Render ảnh
             cv2.imshow("Lane following combined", frame)
             cv2.imshow("Edge", edges)
+
+            key = cv2.waitKey(10) & 0xFF
+            if key == ord('q'):
+                running = False
+                break
 
     except KeyboardInterrupt:
         pass
