@@ -33,7 +33,7 @@ class AutonomousCar:
         self.target_right = 300
         self.target_left = 50
         self.scan_y_left = 0.55
-        self.scan_y_right = 0.75
+        self.scan_y_right = 0.55
         self.debug_frame = None        # Stores visualized frame for the UI
 
     @property
@@ -229,12 +229,11 @@ class AutonomousCar:
         elif action == "LEFT":
             motor.turn_left()
             time.sleep(self.turn_config["90_DEG"])
-        elif action == "SEMI-LEFT":
-            motor.turn_left()
-            time.sleep(self.turn_config["45_DEG"])
-        elif action == "SEMI-RIGHT":
+        elif action =="TURN_AROUND":
             motor.turn_right()
-            time.sleep(self.turn_config["45_DEG"])
+            time.sleep(self.turn_config["90_DEG"])
+            motor.turn_right()
+            time.sleep(self.turn_config["90_DEG"])
         
         motor.stop()
         time.sleep(0.1)

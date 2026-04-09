@@ -226,42 +226,35 @@ with tab2:
 
     with tc_col2:
         with st.container(border=True):
-            st.markdown("**↪️ Rẽ 45° (Nửa góc)**")
-            new_45 = st.number_input(
-                "Thời gian rẽ 45° (giây)",
-                value=float(turn_cfg.get("45_DEG", 0.5)),
+            st.markdown("**↪️ Quay đầu xe**")
+            new_180 = st.number_input(
+                "Thời gian quay đầu xe (giây)",
+                value=float(turn_cfg.get("180_DEG", 0.5)),
                 min_value=0.1, max_value=10.0, step=0.05,
-                key="cal_45deg",
-                help="Thời gian motor rẽ để xe quay đúng 45 độ"
+                key="cal_180deg",
+                help="Thời gian motor rẽ để xe quay đúng 180 độ"
             )
             t_col3, t_col4 = st.columns(2)
-            if t_col3.button("⬅️ Test Rẽ Trái 45°", width='stretch'):
-                if HAS_HW:
-                    import hardware.motor as motor
-                    motor.turn_left()
-                    time.sleep(new_45)
-                    motor.stop()
-                    st.success(f"Rẽ trái {new_45}s xong.")
-                else:
-                    st.warning("Không có HW.")
-            if t_col4.button("➡️ Test Rẽ Phải 45°", width='stretch'):
+            if t_col3.button("⬅️ Test Quay đầu xe", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_right()
-                    time.sleep(new_45)
+                    time.sleep(new_180)
+                    motor.turn_right()
+                    time.sleep(new_180)
                     motor.stop()
-                    st.success(f"Rẽ phải {new_45}s xong.")
+                    st.success(f"Quay đầu xe {new_180}s xong.")
                 else:
                     st.warning("Không có HW.")
-
+    
     st.write("")
     if st.button("💾 Lưu Cấu Hình Rẽ", type="primary", width='stretch'):
-        new_cfg = {"90_DEG": new_90, "45_DEG": new_45}
+        new_cfg = {"90_DEG": new_90, "180_DEG": new_180}
         _save_turn_config(new_cfg)
         st.session_state.turn_config = new_cfg
-        st.success(f"✅ Đã lưu: 90° = {new_90}s | 45° = {new_45}s")
+        st.success(f"✅ Đã lưu: 90° = {new_90}s | 180° = {new_180}s")
 
-    st.caption(f"📌 Cấu hình hiện tại: 90° = {turn_cfg.get('90_DEG')}s | 45° = {turn_cfg.get('45_DEG')}s")
+    st.caption(f"📌 Cấu hình hiện tại: 90° = {turn_cfg.get('90_DEG')}s | 180° = {turn_cfg.get('180_DEG')}s")
 
 with tab1:
     # ──────────────────────────────────────────────
@@ -872,5 +865,5 @@ if car_alive or HAS_HW:
     if car_alive and 'car_instance' in st.session_state and getattr(st.session_state.car_instance, 'current_node', None):
         sim.force_scan(st.session_state.car_instance.current_node)
     
-    time.sleep(0.5)
+    time.sleep(0.3)
     st.rerun()
