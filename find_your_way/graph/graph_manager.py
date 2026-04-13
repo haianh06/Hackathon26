@@ -34,6 +34,9 @@ class GraphManager:
         self.speed_px_per_sec = data.get("speed_px_per_sec", 5.0)
 
         for node_id, attrs in data.get("nodes", {}).items():
+            # Migration: Ensure each node has a 'uids' list
+            if "uids" not in attrs:
+                attrs["uids"] = [node_id]
             self.graph.add_node(node_id, **attrs)
 
         for edge in data.get("edges", []):
@@ -67,7 +70,7 @@ class GraphManager:
 
     def add_node(self, x: float, y: float, node_id: str, label: str = ""):
         """Add a new RFID node at the given map coordinates."""
-        self.graph.add_node(node_id, x=float(x), y=float(y), label=label)
+        self.graph.add_node(node_id, x=float(x), y=float(y), label=label, uids=[node_id])
         self._auto_save()
 
     def edit_node(self, node_id: str, x: float, y: float, label: str):
@@ -84,6 +87,52 @@ class GraphManager:
         if node_id in self.graph:
             self.graph.remove_node(node_id)
             self._auto_save()
+
+    def add_secondary_uid(self, node_id: str, new_uid: str) -> bool:
+        """Associate another UID with an existing node."""
+        if node_id not in self.graph:
+            return False
+        
+        # Check if UID is already in use
+        if self.is_uid_used(new_uid):
+            return False
+            
+        uids = self.graph.nodes[node_id].get("uids", [node_id])
+        if new_uid not in uids:
+            uids.append(new_uid)
+            self.graph.nodes[node_id]["uids"] = uids
+            self._auto_save()
+            return True
+        return False
+
+    def remove_secondary_uid(self, node_id: str, uid: str) -> bool:
+        """Remove a secondary UID (cannot remove the primary node_id)."""
+        if node_id not in self.graph or uid == node_id:
+            return False
+            
+        uids = self.graph.nodes[node_id].get("uids", [node_id])
+        if uid in uids:
+            uids.remove(uid)
+            self.graph.nodes[node_id]["uids"] = uids
+            self._auto_save()
+            return True
+        return False
+
+    def is_uid_used(self, uid: str) -> bool:
+        """Check if a UID is already assigned to any node (primary or secondary)."""
+        for n, d in self.graph.nodes(data=True):
+            if uid == n:
+                return True
+            if uid in d.get("uids", []):
+                return True
+        return False
+
+    def get_node_by_uid(self, uid: str) -> str | None:
+        """Search for a node ID that owns the given UID."""
+        for n, d in self.graph.nodes(data=True):
+            if uid == n or uid in d.get("uids", []):
+                return n
+        return None
 
     def delete_virtual_node(self, node_id: str):
         """

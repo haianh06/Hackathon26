@@ -1,0 +1,13 @@
+{
+    "detector": {
+        "hsv_lower": [90, 50, 50],
+        "hsv_upper": [130, 255, 255],
+        "min_area": 500,
+        "max_area": 50000,
+        "circularity_threshold": 0.7
+    },
+    "classifier": {
+        "template_size": [64, 64],
+        "template_threshold": 0.7
+    }
+}

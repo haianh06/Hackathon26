@@ -4,6 +4,7 @@ import sys
 import time
 import math
 import cv2
+import numpy as np
 
 @st.cache_resource
 def get_camera_manager():
@@ -112,29 +113,260 @@ def _save_turn_config(cfg: dict):
 if "turn_config" not in st.session_state:
     st.session_state.turn_config = _load_turn_config()
 
-# ── Camera Feed (Always Visible) ──────────────────────────────────────────────
-if HAS_HW:
-    with st.container(border=True):
-        cam_col1, cam_col2 = st.columns([2, 1])
-        with cam_col1:
-            # Prioritize showing the debug frame from the car instance (with overlays)
-            frame = None
-            if st.session_state.get("car_instance"):
-                frame = getattr(st.session_state.car_instance, 'debug_frame', None)
-            
-            if frame is None:
-                frame = get_camera_manager().get_frame() if HAS_HW else None
-            
-            if frame is not None:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                st.image(rgb, caption="Live Camera Feed", width='stretch')
-            else:
-                st.info("Chờ Camera khởi động...")
-        with cam_col2:
-            st.markdown("### 🚦 Status")
-            st.metric("Vehicle Mode", "Autonomous" if st.session_state.get("car_instance") and st.session_state.car_instance.is_active else "Standby")
-            if st.button("🔄 Refresh Stream"):
-                st.rerun()
+# ── Media & Recording Initialization ──────────────────────────────────────────
+REC_DIR = "data/recordings"
+SNAP_DIR = "data/snapshots"
+os.makedirs(REC_DIR, exist_ok=True)
+os.makedirs(SNAP_DIR, exist_ok=True)
+
+if "is_recording" not in st.session_state:
+    st.session_state.is_recording = False
+if "video_writer" not in st.session_state:
+    st.session_state.video_writer = None
+if "recording_file" not in st.session_state:
+    st.session_state.recording_file = ""
+
+def stop_recording():
+    if st.session_state.video_writer:
+        st.session_state.video_writer.release()
+        st.session_state.video_writer = None
+    st.session_state.is_recording = False
+    st.session_state.recording_file = ""
+
+# ── Camera Feed & Status Fragments ──────────────────────────────────────────
+@st.fragment(run_every=0.8)
+def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
+    if HAS_HW:
+        with st.container(border=True):
+            cam_col1, cam_col2 = st.columns([2, 1])
+            with cam_col1:
+                frame = None
+                if st.session_state.get("car_instance"):
+                    frame = getattr(st.session_state.car_instance, 'debug_frame', None)
+                
+                if frame is None:
+                    frame = get_camera_manager().get_frame() if HAS_HW else None
+                
+                if frame is not None:
+                    # Handle Recording
+                    if st.session_state.is_recording and st.session_state.video_writer:
+                        # OpenCV VideoWriter expects BGR
+                        st.session_state.video_writer.write(frame)
+
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    st.image(rgb, caption="Live Camera Feed", use_container_width=True)
+                else:
+                    st.info("Chờ Camera khởi động...")
+            with cam_col2:
+                st.markdown("### 🚦 Status")
+                is_auton = st.session_state.get("car_instance") and st.session_state.car_instance.is_active
+                label_prefix = "Vehicle Mode" if key_suffix == "main" else "Vehicle Mode (Manual)"
+                st.metric(label_prefix, "Autonomous" if is_auton else "Standby")
+                
+                if show_media_controls:
+                    st.divider()
+                    # Snapshot Button
+                    if st.button("📸 Chụp Ảnh", use_container_width=True, key=f"snap_btn_{key_suffix}"):
+                        if frame is not None:
+                            fname = f"snap_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
+                            fpath = os.path.join(SNAP_DIR, fname)
+                            cv2.imwrite(fpath, frame)
+                            st.toast(f"✅ Đã lưu: {fname}")
+                    
+                    # Recording Toggle
+                    if not st.session_state.is_recording:
+                        if st.button("🔴 Ghi Hình", use_container_width=True, key=f"rec_btn_{key_suffix}"):
+                            fname = f"rec_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+                            fpath = os.path.join(REC_DIR, fname)
+                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                            h, w = frame.shape[:2]
+                            st.session_state.video_writer = cv2.VideoWriter(fpath, fourcc, 1.0, (w, h))
+                            st.session_state.is_recording = True
+                            st.session_state.recording_file = fname
+                            st.rerun()
+                    else:
+                        st.error(f"⏺️ Đang ghi... ({st.session_state.recording_file})")
+                        if st.button("⏹️ Dừng Ghi", use_container_width=True, key=f"stop_rec_btn_{key_suffix}"):
+                            stop_recording()
+                            st.rerun()
+
+                if st.button("🔄 Refresh Stream", key=f"refresh_btn_{key_suffix}"):
+                    st.rerun()
+
+@st.fragment(run_every=1.5)
+def render_live_logs():
+    st.markdown("### 📝 Live Console Logs")
+    log_container = st.empty()
+    
+    # Sync simulator position with real car if running
+    car_alive = 'car_thread' in st.session_state and st.session_state.car_thread.is_alive()
+    if car_alive and 'car_instance' in st.session_state:
+        curr = getattr(st.session_state.car_instance, 'current_node', None)
+        if curr:
+            st.session_state.simulator.force_scan(curr)
+
+    if 'car_instance' in st.session_state:
+        logs = st.session_state.car_instance.log_history
+        log_container.code("\n".join(logs) if logs else "No logs yet...")
+    else:
+        log_container.info("Logs will appear here when route starts.")
+
+@st.fragment
+def render_wasd_manual_controls():
+    # --- Consolidated Keyboard Focus Area & JS ---
+    combined_html = """
+    <div id="gamepad-focus-area" style="
+        background-color: #1a1a1a;
+        border: 2px solid #555;
+        border-radius: 12px;
+        padding: 25px;
+        text-align: center;
+        cursor: pointer;
+        margin-bottom: 10px;
+        transition: all 0.2s;
+        user-select: none;
+        font-family: sans-serif;
+    " onclick="window.focus();">
+        <h3 style="margin:0; color:#fff; font-size: 1.4em;">🎮 Vùng Kích Hoạt Bàn Phím</h3>
+        <p style="margin:8px 0; color:#888; font-size: 1em;">Nhấn vào đây để lái bằng phím WASD</p>
+        <div style="margin-top: 15px;">
+            <div id="kb-status" style="
+                display: inline-block;
+                width: 14px;
+                height: 14px;
+                background-color: #ff4b4b;
+                border-radius: 50%;
+                margin-right: 10px;
+                box-shadow: 0 0 10px #ff4b4b;
+            "></div>
+            <span id="kb-text" style="color:#eee; font-weight: bold; font-size: 1.1em;">Chưa sẵn sàng</span>
+        </div>
+    </div>
+
+    <script>
+    const pressedKeys = new Set();
+    const statusDot = document.getElementById('kb-status');
+    const statusText = document.getElementById('kb-text');
+    const focusArea = document.getElementById('gamepad-focus-area');
+    
+    function updateStatus(active, key="") {
+        if (!statusDot || !statusText) return;
+        if (active) {
+            statusDot.style.backgroundColor = '#00ff00';
+            statusDot.style.boxShadow = '0 0 15px #00ff00';
+            statusText.innerText = 'ĐANG NHẬN PHÍM: ' + key.toUpperCase();
+            focusArea.style.borderColor = '#00ff00';
+            focusArea.style.backgroundColor = '#1a2e1a';
+        } else {
+            statusDot.style.backgroundColor = '#ffbb00';
+            statusDot.style.boxShadow = '0 0 15px #ffbb00';
+            statusText.innerText = 'ĐÃ SẴN SÀNG (Thả phím)';
+            focusArea.style.borderColor = '#ffbb00';
+            focusArea.style.backgroundColor = '#1a1a1a';
+        }
+    }
+
+    function triggerStreamlitButton(labelPart) {
+        let found = false;
+        const searchInDoc = (doc) => {
+            if (!doc) return false;
+            const buttons = doc.querySelectorAll('button');
+            for (let btn of buttons) {
+                if (btn.innerText && btn.innerText.includes(labelPart)) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (searchInDoc(document)) found = true;
+        if (!found && window.parent) found = searchInDoc(window.parent.document);
+        if (!found && window.top) found = searchInDoc(window.top.document);
+        return found;
+    }
+
+    function handleKey(e, isDown) {
+        const key = e.key.toLowerCase();
+        if (!['w','a','s','d'].includes(key)) return;
+        e.preventDefault();
+        if (isDown) {
+            if (!pressedKeys.has(key)) {
+                pressedKeys.add(key);
+                updateStatus(true, key);
+                let label = "";
+                if (key === 'w') label = "W (Tiến)";
+                else if (key === 'a') label = "A (Trái)";
+                else if (key === 's') label = "S (Dừng)";
+                else if (key === 'd') label = "D (Phải)";
+                triggerStreamlitButton(label);
+            }
+        } else {
+            if (pressedKeys.has(key)) {
+                pressedKeys.delete(key);
+                if (pressedKeys.size === 0) {
+                    updateStatus(false);
+                    triggerStreamlitButton("S (Dừng)");
+                } else {
+                    const lastKey = Array.from(pressedKeys).pop();
+                    updateStatus(true, lastKey);
+                }
+            }
+        }
+    }
+
+    const setReady = () => {
+        window.focus();
+        if (statusDot) {
+            statusDot.style.backgroundColor = '#ffbb00';
+            statusDot.style.boxShadow = '0 0 10px #ffbb00';
+            statusText.innerText = 'ĐÃ SẴN SÀNG (Nhấn phím để lái)';
+            focusArea.style.borderColor = '#ffbb00';
+        }
+    };
+
+    if (focusArea) focusArea.addEventListener('mousedown', setReady);
+    document.addEventListener('keydown', (e) => handleKey(e, true));
+    document.addEventListener('keyup', (e) => handleKey(e, false));
+    try {
+        window.parent.document.addEventListener('keydown', (e) => {
+            if (['w','a','s','d'].includes(e.key.toLowerCase())) setReady();
+            handleKey(e, true);
+        });
+        window.parent.document.addEventListener('keyup', (e) => handleKey(e, false));
+    } catch (err) {}
+    </script>
+    """
+    import streamlit.components.v1 as components
+    components.html(combined_html, height=200)
+
+    st.info("Sử dụng **W, A, S, D** trên bàn phím (Nhấn để chạy, Thả để dừng).")
+    
+    # Simple WASD layout
+    cw1, cw2, cw3 = st.columns([1, 1, 1])
+    with cw2:
+        if st.button("🔼 W (Tiến)", key="btn_w", width='stretch'):
+            st.session_state.manual_last_cmd = "FORWARD"
+            if HAS_HW: motor.move_straight()
+    
+    cl1, cl2, cl3 = st.columns([1, 1, 1])
+    with cl1:
+        if st.button("◀️ A (Trái)", key="btn_a", width='stretch'):
+            st.session_state.manual_last_cmd = "LEFT"
+            if HAS_HW: motor.turn_left()
+    with cl2:
+        if st.button("⏹️ S (Dừng)", key="btn_s", width='stretch'):
+            st.session_state.manual_last_cmd = "STOP"
+            if HAS_HW: motor.stop()
+    with cl3:
+        if st.button("▶️ D (Phải)", key="btn_d", width='stretch'):
+            st.session_state.manual_last_cmd = "RIGHT"
+            if HAS_HW: motor.turn_right()
+    
+    st.divider()
+    st.write(f"Lệnh cuối cùng: **{st.session_state.manual_last_cmd}**")
+
+# ── Main UI Layout ────────────────────────────────────────────────────────────
+render_live_camera_and_status(key_suffix="main")
 
 # ─────────────────────────────────────────────────────────────────────────────
 gm: GraphManager = st.session_state.graph_manager
@@ -155,7 +387,7 @@ col3.metric(
 )
 
 
-tab1, tab2, tab3 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)", "🎮 Điều Khiển WASD"])
+tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)", "🎮 Điều Khiển WASD", "🚦 Traffic Signs"])
 
 with tab2:
     st.header("⚙️ Calibration — Tốc độ & Thời gian Rẽ")
@@ -321,8 +553,8 @@ with tab1:
                     type="primary"
                 ):
                     uid_clean = scanned_id.strip()
-                    if uid_clean in gm.graph:
-                        st.error(f"❌ ID '{uid_clean}' đã tồn tại trên bản đồ!")
+                    if gm.is_uid_used(uid_clean):
+                        st.error(f"❌ UID '{uid_clean}' đã được sử dụng!")
                     else:
                         st.session_state.rfid_pending = {
                             "id": uid_clean,
@@ -352,12 +584,13 @@ with tab1:
         upd_col2.write("")
         upd_col2.write("")
         if upd_col2.button("Cập nhật", width='stretch'):
-            if sim.force_scan(upd_id):
-                st.success("✅ Cập nhật vị trí xe thành công!")
+            resolved_node = gm.get_node_by_uid(upd_id)
+            if resolved_node and sim.force_scan(resolved_node):
+                st.success(f"✅ Cập nhật vị trí xe thành công! (Node: {resolved_node})")
                 time.sleep(0.5)
                 st.rerun()
             else:
-                st.error("❌ Thẻ không nằm trên lộ trình hiện tại!")
+                st.error("❌ Thẻ không tồn tại trên Map hoặc không nằm trên lộ trình!")
 
     st.write("---")
 
@@ -522,8 +755,8 @@ with tab1:
                     else:
                         id_str = pending["id"]
                         lbl_str = pending["label"]
-                        if id_str in gm.graph:
-                            st.error(f"❌ Mã '{id_str}' đã có mặt trên Map rồi!")
+                        if gm.is_uid_used(id_str):
+                            st.error(f"❌ UID '{id_str}' đã được sử dụng!")
                         else:
                             gm.add_node(clk_x, clk_y, id_str, lbl_str)
                             st.success(f"✅ Đã ghim thẻ **{id_str}** ({lbl_str}) tại ({clk_x:.1f}, {clk_y:.1f})!")
@@ -637,7 +870,66 @@ with tab1:
                 else:
                     row = st.columns([2, 3, 1.2, 1.2, 1.2, 1.2])
                     row[0].code(str(node_id))
-                    row[1].write(ndata.get('label', '—') or '—')
+                    uids = ndata.get('uids', [node_id])
+                    with row[1]:
+                        st.write(ndata.get('label', '—') or '—')
+                        
+                        # List UIDs with small delete buttons for secondary ones
+                        uid_cols = st.columns([1, 1, 1])
+                        for i, u in enumerate(uids):
+                            col_idx = i % 3
+                            with uid_cols[col_idx]:
+                                if u == node_id:
+                                    st.caption(f"🆔 `{u}`")
+                                else:
+                                    if st.button(f"X `{u}`", key=f"del_uid_{node_id}_{u}", help=f"Xóa UID {u}", type="secondary"):
+                                        if gm.remove_secondary_uid(node_id, u):
+                                            st.rerun()
+
+                        # Add UID Input & Scan Button
+                        add_uid_key = f"add_uid_input_{node_id}"
+                        # Ensure key exists in state to avoid initialization issues
+                        if add_uid_key not in st.session_state:
+                            st.session_state[add_uid_key] = ""
+
+                        col_input, col_scan = st.columns([1.5, 1])
+                        
+                        def handle_add_uid():
+                            val = st.session_state[add_uid_key].strip()
+                            if val:
+                                if gm.add_secondary_uid(node_id, val):
+                                    st.toast(f"✅ Đã thêm {val} cho node {node_id}")
+                                    st.session_state[add_uid_key] = "" # Clear after success
+                                else:
+                                    st.error(f"❌ UID {val} đã tồn tại!")
+
+                        new_uid = col_input.text_input(
+                            "➕ UID", 
+                            key=add_uid_key, 
+                            label_visibility="collapsed", 
+                            placeholder="Thêm UID...",
+                            on_change=handle_add_uid
+                        )
+                        
+                        if HAS_RFID:
+                            if col_scan.button("🔍 Quét", key=f"scan_btn_{node_id}", help="Quét thẻ để gán vào node này", use_container_width=True):
+                                with st.spinner(f"Đang chờ thẻ cho {node_id}..."):
+                                    reader = get_rfid_reader()
+                                    try:
+                                        scanned = reader.read_uid_hex(timeout=3.0)
+                                        if scanned:
+                                            if gm.add_secondary_uid(node_id, scanned):
+                                                st.toast(f"✅ Đã gán {scanned} cho {node_id}")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"❌ UID {scanned} đã tồn tại!")
+                                        else:
+                                            st.warning("⚠️ Hết thời gian chờ (Timeout)")
+                                    except Exception as e:
+                                        st.error(f"Lỗi: {e}")
+                        else:
+                            col_scan.button("🔍 Quét", disabled=True, key=f"scan_btn_off_{node_id}", use_container_width=True)
+
                     row[2].write(f"{ndata['x']:.1f}")
                     row[3].write(f"{ndata['y']:.1f}")
                     if row[4].button("✏️", key=f"edit_btn_{node_id}", help="Sửa node này"):
@@ -749,19 +1041,6 @@ with tab1:
                     st.stop()
 
                 st.session_state.car_logs = []
-                gm_edges = {}
-                for u in gm.graph.nodes():
-                    gm_edges[u] = {}
-                    for v in gm.graph.neighbors(u):
-                        gm_edges[u][v] = gm.graph[u][v].get('weight', 1)
-
-                if 'autonomous_main' in sys.modules:
-                    importlib.reload(sys.modules['autonomous_main'])
-                from autonomous_main import AutonomousCar
-
-                rfid_map = {n: n for n in gm.graph.nodes()}
-
-                # Build adjacency dict expected by NavEngine and node coordinates
                 graph_adj = {
                     'nodes': {n: {'x': gm.graph.nodes[n]['x'], 'y': gm.graph.nodes[n]['y']} for n in gm.graph.nodes()},
                     'edges': {}
@@ -771,99 +1050,115 @@ with tab1:
                     for v in gm.graph.neighbors(u):
                         graph_adj['edges'][u][v] = gm.graph[u][v].get('weight', 1)
 
-                # turn_table maps (from_node, to_node) -> action string (from graph_data.py)
-                turn_table = TURN_CONFIG if isinstance(TURN_CONFIG, dict) else {}
+                rfid_map = {}
+                for n, d in gm.graph.nodes(data=True):
+                    node_uids = d.get('uids', [n])
+                    for u in node_uids:
+                        rfid_map[u] = n
 
-                # Use calibrated turn timing from session state (saved in data/turn_config.json)
-                live_turn_config = st.session_state.turn_config
-
+                from autonomous_main import AutonomousCar
                 car = AutonomousCar(
                     target_node=target,
                     graph=graph_adj,
-                    turn_table=turn_table,
+                    turn_table=TURN_CONFIG if isinstance(TURN_CONFIG, dict) else {},
                     rfid_map=rfid_map,
-                    turn_config=live_turn_config,
+                    turn_config=st.session_state.turn_config,
                     predefined_path=st.session_state.current_path,
                 )
                 st.session_state.car_instance = car
                 st.session_state.car_thread = threading.Thread(target=car.execute, daemon=True)
                 st.session_state.car_thread.start()
-                st.success("Đã gửi API điều hướng xuống vi điều khiển xe! Theo dõi hành trình ngoài thực tế.")
+                st.success("Đã gửi API điều hướng xuống vi điều khiển xe!")
 
             if stop_col.button("🛑 DỪNG XE KHẨN CẤP (STOP)"):
                 if 'car_instance' in st.session_state:
                     st.session_state.car_instance.stop_system()
-                    st.success("Đã kích hoạt phanh khẩn cấp! Động cơ đã ngắt.")
-                else:
-                    st.warning("Xe chưa khởi động hoặc đã mất kết nối.")
-
-            st.markdown("### 📝 Live Console Logs")
-            log_container = st.empty()
-            if 'car_instance' in st.session_state:
-                logs = st.session_state.car_instance.log_history
-                log_container.code("\n".join(logs) if logs else "No logs yet...")
-            else:
-                log_container.info("Logs will appear here when route starts.")
+                    st.success("Đã kích hoạt phanh khẩn cấp!")
+            
+            render_live_logs()
 
 with tab3:
     st.header("🎮 Điều Khiển Thủ Công (WASD)")
-    st.info("Sử dụng các phím **W, A, S, D** trên bàn phím hoặc các nút bên dưới để điều khiển xe.")
-    
-    # Simple WASD layout
-    cw1, cw2, cw3 = st.columns([1, 1, 1])
-    with cw2:
-        if st.button("🔼 W (Tiến)", width='stretch'):
-            st.session_state.manual_last_cmd = "FORWARD"
-            if HAS_HW: motor.move_straight()
-    
-    cl1, cl2, cl3 = st.columns([1, 1, 1])
-    with cl1:
-        if st.button("◀️ A (Trái)", width='stretch'):
-            st.session_state.manual_last_cmd = "LEFT"
-            if HAS_HW: motor.turn_left()
-    with cl2:
-        if st.button("⏹️ S (Dừng)", width='stretch'):
-            st.session_state.manual_last_cmd = "STOP"
-            if HAS_HW: motor.stop()
-    with cl3:
-        if st.button("▶️ D (Phải)", width='stretch'):
-            st.session_state.manual_last_cmd = "RIGHT"
-            if HAS_HW: motor.turn_right()
+    # Live Camera with Media Controls inside this tab
+    render_live_camera_and_status(show_media_controls=True, key_suffix="wasd")
+    # Optimized Manual Controls in a separate fragment to prevent camera flickering
+    render_wasd_manual_controls()
 
-    # JS for WASD listener
-    js_code = """
-    <script>
-    document.addEventListener('keydown', function(e) {
-        const key = e.key.toLowerCase();
-        let cmd = "";
-        if (key === 'w') cmd = "FORWARD";
-        else if (key === 'a') cmd = "LEFT";
-        else if (key === 's') cmd = "STOP";
-        else if (key === 'd') cmd = "RIGHT";
+with tab4:
+    st.header("🚦 Traffic Sign Detection Calibration")
+    
+    from utils.traffic_sign_recognition import TrafficSignRecognition
+    if 'tsr_instance' not in st.session_state:
+        st.session_state.tsr_instance = TrafficSignRecognition()
+    
+    tsr = st.session_state.tsr_instance
+    
+    col_t1, col_t2 = st.columns([1, 1])
+    
+    with col_t1:
+        st.subheader("🎨 HSV Thresholding (Blue Detection)")
+        h_low = st.slider("H Lower", 0, 180, int(tsr.hsv_lower[0]))
+        s_low = st.slider("S Lower", 0, 255, int(tsr.hsv_lower[1]))
+        v_low = st.slider("V Lower", 0, 255, int(tsr.hsv_lower[2]))
         
-        if (cmd) {
-            // Find the button and click it to trigger Streamlit's backend
-            const buttons = window.parent.document.querySelectorAll('button');
-            for (let btn of buttons) {
-                if (btn.innerText.includes(key.toUpperCase())) {
-                    btn.click();
-                    break;
-                }
-            }
-        }
-    });
-    </script>
-    """
-    st.html(js_code)
+        h_up = st.slider("H Upper", 0, 180, int(tsr.hsv_upper[0]))
+        s_up = st.slider("S Upper", 0, 255, int(tsr.hsv_upper[1]))
+        v_up = st.slider("V Upper", 0, 255, int(tsr.hsv_upper[2]))
+        
+        if st.button("💾 Save HSV Config"):
+            tsr.hsv_lower = np.array([h_low, s_low, v_low], dtype=np.uint8)
+            tsr.hsv_upper = np.array([h_up, s_up, v_up], dtype=np.uint8)
+            tsr.save_config()
+            st.success("HSV Config Saved!")
+
+    with col_t2:
+        st.subheader("📐 Shape & Confidence")
+        min_area = st.number_input("Min Area", 10, 100000, int(tsr.min_area))
+        circ_thresh = st.slider("Circularity Threshold", 0.0, 1.0, float(tsr.circularity_threshold), 0.05)
+        conf_thresh = st.slider("Confidence Threshold", 0.0, 1.0, float(tsr.confidence_threshold), 0.05)
+        
+        if st.button("💾 Save Shape Config"):
+            tsr.min_area = min_area
+            tsr.circularity_threshold = circ_thresh
+            tsr.confidence_threshold = conf_thresh
+            tsr.save_config()
+            st.success("Shape Config Saved!")
 
     st.divider()
-    st.write(f"Lệnh cuối cùng: **{st.session_state.manual_last_cmd}**")
-
-# ── Auto-refresh Logic ────────────────────────────────────────────────────────
-car_alive = 'car_thread' in st.session_state and st.session_state.car_thread.is_alive()
-if car_alive or HAS_HW:
-    if car_alive and 'car_instance' in st.session_state and getattr(st.session_state.car_instance, 'current_node', None):
-        sim.force_scan(st.session_state.car_instance.current_node)
+    st.subheader("🖼️ Template Management")
+    t_cols = st.columns(4)
+    signs = ['straight', 'left', 'right', 'parking']
+    filenames = ['up.png', 'left.png', 'right.png', 'p.png']
     
-    time.sleep(0.3)
-    st.rerun()
+    for i, sign in enumerate(signs):
+        with t_cols[i]:
+            st.write(f"**{sign.upper()}**")
+            temp_path = tsr.templates_dir / filenames[i]
+            if temp_path.exists():
+                st.image(str(temp_path), width=100)
+            else:
+                st.warning("Missing")
+            
+            uploaded_file = st.file_uploader(f"Upload {filenames[i]}", type=['png', 'jpg'], key=f"upload_{sign}")
+            if uploaded_file is not None:
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                st.success(f"Uploaded {filenames[i]}")
+                tsr.load_templates()
+                st.rerun()
+
+    st.divider()
+    st.subheader("🎥 Live Detection Test")
+    if st.checkbox("Enable Live Detection Overlay"):
+        test_frame = get_camera_manager().get_frame()
+        if test_frame is not None:
+            results = tsr.detect_and_classify(test_frame)
+            annotated = tsr.draw_detections(test_frame, results)
+            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Live Detection Preview")
+            if results:
+                for r in results:
+                    st.write(f"✅ **{r['label'].upper()}** - Confidence: {r['confidence']:.2f}")
+        else:
+            st.info("Wait for camera...")
+
+# ── End of App ────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import hardware.motor as motor
 import cv2
 import numpy as np
 from hardware.camera import camera_manager
+from utils.traffic_sign_recognition import TrafficSignRecognition
 
 class CarState(Enum):
     IDLE = auto()
@@ -21,6 +22,7 @@ class AutonomousCar:
         self.rfid_map = rfid_map
         self.turn_config = turn_config
         self.predefined_path = predefined_path
+        self.tsr = TrafficSignRecognition()
         self.prev_node = None
         self.current_node = predefined_path[0] if predefined_path else None
         self.next_node = None
@@ -29,11 +31,14 @@ class AutonomousCar:
         self.is_active = False
         self.log_history = []          # Live console logs for the web UI
         self.last_lane = "right"       # Memory for search direction
+        self.last_left_x = -1
+        self.last_right_x = -1
         self.base_speed = 120
         self.target_right = 300
         self.target_left = 50
-        self.scan_y_left = 0.55
-        self.scan_y_right = 0.55
+        self.scan_y_left = 0.45        # New ratio from HD
+        self.scan_y_right = 0.62       # New ratio from HD
+        self.scan_search_up_rows = 35  # Scanning range
         self.debug_frame = None        # Stores visualized frame for the UI
 
     @property
@@ -120,8 +125,22 @@ class AutonomousCar:
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blurred, 100, 200)
 
+        # Draw edge visualization overlay
+        self._draw_edge_overlay(frame, edges)
+
         left_x, y_left = self._find_left_lane(edges)
         right_x, y_right = self._find_right_lane(edges)
+        
+        # Improvement: Use last known lane position if current detection is missing
+        if left_x != -1:
+            self.last_left_x = left_x
+        elif self.last_left_x != -1:
+            left_x = self.last_left_x
+
+        if right_x != -1:
+            self.last_right_x = right_x
+        elif self.last_right_x != -1:
+            right_x = self.last_right_x
 
         # --- Visualization Logic (HD) ---
         display_frame = frame.copy()
@@ -139,8 +158,10 @@ class AutonomousCar:
 
         if left_x != -1:
             cv2.circle(display_frame, (left_x, y_left), 6, (0, 140, 255), -1)
+            cv2.putText(display_frame, f"L:{left_x}", (left_x + 6, y_left - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 180, 255), 1)
         if right_x != -1:
             cv2.circle(display_frame, (right_x, y_right), 6, (255, 80, 0), -1)
+            cv2.putText(display_frame, f"R:{right_x}", (right_x - 40, y_right - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 120, 0), 1)
 
         steering = 0
         mode = "search"
@@ -153,12 +174,23 @@ class AutonomousCar:
             self.last_lane = "left"
             steering = -(left_x - self.target_left) * 3
         
-        # HUD Orientation Mark
+        # HUD Orientation Mark (Enhanced)
         self._draw_orientation_mark(display_frame, steering)
-        cv2.putText(display_frame, f"Mode: {mode}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 255, 80), 1)
         
+        if mode in ["right", "left"]:
+            cv2.putText(display_frame, f"Mode: {mode} lane", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 255, 80), 1)
+        else:
+            cv2.putText(display_frame, f"Mode: {mode}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 80, 255), 1)
+            
         # Update debug frame for Streamlit
         self.debug_frame = display_frame
+
+        # --- Traffic Sign Detection ---
+        signs = self.tsr.detect_and_classify(frame)
+        if signs:
+            self.debug_frame = self.tsr.draw_detections(self.debug_frame, signs)
+            for s in signs:
+                self._log(f"[SIGN] Phát hiện: {s['label'].upper()} ({s['confidence']*100:.1f}%)")
 
         # Motor control
         if mode in ["right", "left"]:
@@ -173,54 +205,83 @@ class AutonomousCar:
         h, w = frame.shape[:2]
         bot = h
         if left_x != -1 and right_x != -1:
+            # Fill lane between two lines
             pts = np.array([[left_x, y_left], [right_x, y_right], [right_x, bot], [left_x, bot]], dtype=np.int32)
             cv2.fillPoly(overlay, [pts], (0, 200, 80))
             cv2.addWeighted(overlay, 0.30, frame, 0.70, 0, frame)
             cv2.line(frame, (left_x, y_left), (left_x, bot), (0, 140, 255), 2)
             cv2.line(frame, (right_x, y_right), (right_x, bot), (255, 80, 0), 2)
         elif left_x != -1:
+            # Only left lane detected
             cv2.line(frame, (left_x, y_left), (left_x, bot), (0, 140, 255), 2)
+            pts = np.array([[left_x, y_left], [w // 2, y_left], [w // 2, bot], [left_x, bot]], dtype=np.int32)
+            cv2.fillPoly(overlay, [pts], (0, 140, 255))
+            cv2.addWeighted(overlay, 0.20, frame, 0.80, 0, frame)
         elif right_x != -1:
+            # Only right lane detected
             cv2.line(frame, (right_x, y_right), (right_x, bot), (255, 80, 0), 2)
+            pts = np.array([[w // 2, y_right], [right_x, y_right], [right_x, bot], [w // 2, bot]], dtype=np.int32)
+            cv2.fillPoly(overlay, [pts], (255, 80, 0))
+            cv2.addWeighted(overlay, 0.20, frame, 0.80, 0, frame)
+
+    def _draw_edge_overlay(self, frame, edges):
+        """Draw Canny edges as colored semi-transparent overlay."""
+        edge_overlay = np.zeros_like(frame)
+        edge_overlay[:, :, 0] = edges  # Blue channel
+        edge_overlay[:, :, 2] = edges // 2  # Red channel -> Purple tint
+        cv2.addWeighted(edge_overlay, 0.15, frame, 0.85, 0, frame)
 
     def _draw_orientation_mark(self, frame, steering):
+        """Draw enhanced steering indicator arrow HUD."""
         h, w = frame.shape[:2]
-        base_y = int(h * 0.85)
+        base_y = int(h * 0.82)
         cx = w // 2
         max_steer = 200
         clamped = max(-max_steer, min(max_steer, steering))
         arrow_len = int((clamped / max_steer) * (w // 4))
         tip_x = cx + arrow_len
-        cv2.rectangle(frame, (cx - w // 4, base_y - 10), (cx + w // 4, base_y + 10), (30, 30, 30), -1)
-        cv2.line(frame, (cx, base_y), (tip_x, base_y), (0, 255, 255), 2)
+
+        ratio = abs(clamped) / max_steer
+        color = (int(50 + ratio * 200), int(230 - ratio * 150), int(ratio * 255))
+
+        bar_h = 28
+        cv2.rectangle(frame, (cx - w // 4, base_y - bar_h // 2), (cx + w // 4, base_y + bar_h // 2), (30, 30, 30), -1)
+        cv2.rectangle(frame, (cx, base_y - bar_h // 4), (tip_x, base_y + bar_h // 4), color, -1)
         if arrow_len != 0:
-            cv2.arrowedLine(frame, (cx, base_y), (tip_x, base_y), (0, 255, 255), 2, tipLength=0.3)
+            cv2.arrowedLine(frame, (cx, base_y), (tip_x, base_y), color, 2, tipLength=0.35)
+        cv2.line(frame, (cx, base_y - bar_h // 2), (cx, base_y + bar_h // 2), (200, 200, 200), 1)
+        label = f"Steer: {int(steering):+d}"
+        cv2.putText(frame, label, (cx - w // 4, base_y - bar_h // 2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1)
 
     def _find_left_lane(self, edges):
         height, width = edges.shape
-        y = int(height * self.scan_y_left)
-        line = edges[y]
-        mid = len(line) // 2
-        left_half = line[:mid]
-        if left_half.sum() == 0:
-            return -1, y
-        inner_x = mid - 1 - np.argmax(left_half[::-1])
-        if inner_x <= 0:
-            return -1, y
-        return inner_x, y
+        base_y = int(height * self.scan_y_left)
+        for offset in range(self.scan_search_up_rows + 1):
+            y = base_y - offset
+            if y < 0: break
+            line = edges[y]
+            mid = len(line) // 2
+            left_half = line[:mid]
+            if left_half.sum() != 0:
+                inner_x = mid - 1 - np.argmax(left_half[::-1])
+                if inner_x > 0:
+                    return inner_x, y
+        return -1, base_y
 
     def _find_right_lane(self, edges):
         height, width = edges.shape
-        y = int(height * self.scan_y_right)
-        line = edges[y]
-        mid = len(line) // 2
-        right_half = line[mid:]
-        if right_half.sum() == 0:
-            return -1, y
-        inner_x = mid + np.argmax(right_half)
-        if inner_x >= width - 1:
-            return -1, y
-        return inner_x, y
+        base_y = int(height * self.scan_y_right)
+        for offset in range(self.scan_search_up_rows + 1):
+            y = base_y - offset
+            if y < 0: break
+            line = edges[y]
+            mid = len(line) // 2
+            right_half = line[mid:]
+            if right_half.sum() != 0:
+                inner_x = mid + np.argmax(right_half)
+                if inner_x < width - 1:
+                    return inner_x, y
+        return -1, base_y
 
     def execute_motor_action(self, action):
         if action == "RIGHT":
