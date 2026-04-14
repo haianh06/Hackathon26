@@ -50,14 +50,25 @@ class CameraManager:
                 try:
                     print("CameraManager: Initializing Picamera2...")
                     self.picam2 = Picamera2()
-                    # Request 800x600 to match the HD standalone script's wide perspective
+                    
+                    # Align with HD standalone script: dynamic scaling to preserve wide FOV
+                    sensor_res = self.picam2.sensor_resolution
+                    scale = 800 / sensor_res[0] if sensor_res[0] > 800 else 1.0
+                    target_size = (int(sensor_res[0] * scale), int(sensor_res[1] * scale))
+                    
                     config = self.picam2.create_preview_configuration(
-                        main={"size": (800, 600), "format": "BGR888"}
+                        main={"size": target_size, "format": "RGB888"}
                     )
                     self.picam2.configure(config)
+                    try:
+                        # Only set LensPosition if supported by hardware (e.g. V3 camera)
+                        if "LensPosition" in self.picam2.controls:
+                            self.picam2.set_controls({"LensPosition": 0.5})
+                    except Exception:
+                        pass
                     self.picam2.start()
                     time.sleep(1.0)
-                    print("✅ CameraManager: Picamera2 ready")
+                    print(f"✅ CameraManager: Picamera2 ready ({target_size[0]}x{target_size[1]})")
                 except Exception as e:
                     print(f"⚠️ CameraManager: Picamera2 failed: {e}")
                     if self.picam2:
@@ -99,11 +110,14 @@ class CameraManager:
                 if self.picam2:
                     frame = self.picam2.capture_array()
                     with self.lock:
+                        # picamera2 returns BGR natively on this system. OpenCV cap.read() also returns BGR.
+                        # Standardizing all camera manager output to BGR.
                         self.frame = frame
                 elif self.cap:
                     ret, frame = self.cap.read()
                     if ret:
                         with self.lock:
+                            # OpenCV reads BGR natively.
                             self.frame = frame
                     else:
                         print("⚠️ CameraManager: OpenCV frame lost. Resetting...")

@@ -50,3 +50,21 @@ class NavEngine:
         elif 25 < diff <= 135: return "LEFT"
         elif -135 <= diff < -25: return "RIGHT"
         else: return "TURN_AROUND"
+
+    def get_initial_action(self, curr_node, next_node, initial_heading):
+        """Calculate turn action from an initial heading angle to the first segment."""
+        # Fallback if node coordinates are missing
+        if not self.nodes or curr_node not in self.nodes or next_node not in self.nodes:
+            return "STRAIGHT"
+
+        dx = self.nodes[next_node]['x'] - self.nodes[curr_node]['x']
+        dy = self.nodes[next_node]['y'] - self.nodes[curr_node]['y']
+        target_angle = math.degrees(math.atan2(dy, dx))
+
+        diff = (target_angle - initial_heading) % 360
+        if diff > 180: diff -= 360
+
+        if -25 <= diff <= 25: return "STRAIGHT"
+        elif 25 < diff <= 135: return "LEFT"
+        elif -135 <= diff < -25: return "RIGHT"
+        else: return "TURN_AROUND"

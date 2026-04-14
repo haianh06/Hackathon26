@@ -24,6 +24,7 @@ def create_parking_lot_map(
     waypoints=None,
     visit_order=None,
     segment_breaks=None,
+    initial_heading=None,
 ):
     """
     Render the interactive parking lot map.
@@ -131,7 +132,7 @@ def create_parking_lot_map(
         for i, n in enumerate(visit_order):
             visit_rank[n] = i + 1
 
-    node_x, node_y, custom_data, node_colors, node_text, sizes = [], [], [], [], [], []
+    node_x, node_y, custom_data, node_colors, node_text, sizes, symbols = [], [], [], [], [], [], []
     for node, data in G.nodes(data=True):
         node_x.append(data['x'])
         node_y.append(data['y'])
@@ -139,11 +140,25 @@ def create_parking_lot_map(
 
         c = '#1f78b4'
         s = 10
+        symbol = "circle"
+
+        is_rfid = data.get('is_rfid', True)
+        if not is_rfid:
+            c = '#757575'; s = 7 # Small grey for Waypoints
 
         if node == sim_node:
             c = 'yellow'; s = 18
         elif node == start_node:
-            c = '#00e676'; s = 18   # bright green for start
+            c = '#00e676'; s = 22   # bright green for start, slightly larger
+            sym = "circle"
+            if initial_heading is not None:
+                # Map angles to Plotly triangle symbols
+                # 0: Right, 90: Up, 180: Left, 270: Down
+                if initial_heading == 0: sym = "triangle-right"
+                elif initial_heading == 90: sym = "triangle-up"
+                elif initial_heading == 180: sym = "triangle-left"
+                elif initial_heading == 270: sym = "triangle-down"
+            symbol = sym
         elif node == end_node:
             c = 'red'; s = 15
         elif node in waypoints and node in visit_rank:
@@ -155,6 +170,7 @@ def create_parking_lot_map(
 
         node_colors.append(c)
         sizes.append(s)
+        symbols.append(symbol)
 
         # Hover text
         label = data.get('label', '') or node
@@ -170,7 +186,7 @@ def create_parking_lot_map(
         x=node_x, y=node_y, mode='markers',
         hoverinfo='text',
         hovertext=node_text,
-        marker=dict(showscale=False, color=node_colors, size=sizes, line_width=2),
+        marker=dict(showscale=False, color=node_colors, size=sizes, symbol=symbols, line_width=2),
         name="RFID Checkpoints",
         customdata=custom_data,
         textfont=dict(color="black")

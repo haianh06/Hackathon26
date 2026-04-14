@@ -312,3 +312,37 @@ def compute_multi_stop_path(graph_manager, start: str, waypoints: list, algorith
             full_path.extend(sub_path[1:])
 
     return full_path, total_cost, visit_order, is_exact
+
+
+def compute_sequential_path(graph_manager, start: str, waypoints: list, algorithm: str = "Dijkstra"):
+    """
+    Compute a multi-stop path that visits waypoints in exactly the order provided.
+    
+    Parameters
+    ----------
+    graph_manager : GraphManager
+    start         : starting node ID
+    waypoints     : list of node IDs to visit in strict order
+    algorithm     : "Dijkstra" or "A*"
+    
+    Returns
+    -------
+    (full_path, total_cost, visit_order)
+    """
+    all_sequence = [start] + waypoints
+    full_path = []
+    total_cost = 0.0
+    
+    for i in range(len(all_sequence) - 1):
+        u, v = all_sequence[i], all_sequence[i+1]
+        path, cost = compute_shortest_path(graph_manager, u, v, algorithm)
+        if not path:
+            return [], 0.0, waypoints
+        
+        if not full_path:
+            full_path.extend(path)
+        else:
+            full_path.extend(path[1:])
+        total_cost += cost
+        
+    return full_path, total_cost, waypoints

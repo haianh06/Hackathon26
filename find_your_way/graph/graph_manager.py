@@ -17,6 +17,7 @@ class GraphManager:
     def __init__(self):
         self.graph: nx.Graph = nx.Graph()
         self._counter: int = 0          # used to generate unique virtual-node IDs
+        self._waypoint_counter: int = 0 # used for persistent Waypoint node IDs
         self.speed_px_per_sec: float = 5.0
 
     # ─────────────────────────── Persistence ────────────────────────────────
@@ -31,9 +32,13 @@ class GraphManager:
 
         self.graph.clear()
         self._counter = data.get("counter", 0)
+        self._waypoint_counter = data.get("waypoint_counter", 0)
         self.speed_px_per_sec = data.get("speed_px_per_sec", 5.0)
 
         for node_id, attrs in data.get("nodes", {}).items():
+            # Migration: Ensure each node has a 'uids' list
+            if "uids" not in attrs:
+                attrs["uids"] = [node_id]
             self.graph.add_node(node_id, **attrs)
 
         for edge in data.get("edges", []):
@@ -55,6 +60,7 @@ class GraphManager:
             "nodes": nodes,
             "edges": edges,
             "counter": self._counter,
+            "waypoint_counter": self._waypoint_counter,
             "speed_px_per_sec": self.speed_px_per_sec,
         }
         with open(path, "w") as f:
@@ -65,9 +71,10 @@ class GraphManager:
 
     # ──────────────────────────── Node CRUD ─────────────────────────────────
 
-    def add_node(self, x: float, y: float, node_id: str, label: str = ""):
-        """Add a new RFID node at the given map coordinates."""
-        self.graph.add_node(node_id, x=float(x), y=float(y), label=label)
+    def add_node(self, x: float, y: float, node_id: str, label: str = "", is_rfid: bool = True):
+        """Add a new node (RFID or Waypoint) at the given map coordinates."""
+        uids = [node_id] if is_rfid else []
+        self.graph.add_node(node_id, x=float(x), y=float(y), label=label, uids=uids, is_rfid=is_rfid)
         self._auto_save()
 
     def edit_node(self, node_id: str, x: float, y: float, label: str):
@@ -84,6 +91,52 @@ class GraphManager:
         if node_id in self.graph:
             self.graph.remove_node(node_id)
             self._auto_save()
+
+    def add_secondary_uid(self, node_id: str, new_uid: str) -> bool:
+        """Associate another UID with an existing node."""
+        if node_id not in self.graph:
+            return False
+        
+        # Check if UID is already in use
+        if self.is_uid_used(new_uid):
+            return False
+            
+        uids = self.graph.nodes[node_id].get("uids", [node_id])
+        if new_uid not in uids:
+            uids.append(new_uid)
+            self.graph.nodes[node_id]["uids"] = uids
+            self._auto_save()
+            return True
+        return False
+
+    def remove_secondary_uid(self, node_id: str, uid: str) -> bool:
+        """Remove a secondary UID (cannot remove the primary node_id)."""
+        if node_id not in self.graph or uid == node_id:
+            return False
+            
+        uids = self.graph.nodes[node_id].get("uids", [node_id])
+        if uid in uids:
+            uids.remove(uid)
+            self.graph.nodes[node_id]["uids"] = uids
+            self._auto_save()
+            return True
+        return False
+
+    def is_uid_used(self, uid: str) -> bool:
+        """Check if a UID is already assigned to any node (primary or secondary)."""
+        for n, d in self.graph.nodes(data=True):
+            if uid == n:
+                return True
+            if uid in d.get("uids", []):
+                return True
+        return False
+
+    def get_node_by_uid(self, uid: str) -> str | None:
+        """Search for a node ID that owns the given UID."""
+        for n, d in self.graph.nodes(data=True):
+            if uid == n or uid in d.get("uids", []):
+                return n
+        return None
 
     def delete_virtual_node(self, node_id: str):
         """
@@ -132,6 +185,10 @@ class GraphManager:
     def _new_virtual_id(self) -> str:
         self._counter += 1
         return f"V_{self._counter}"
+
+    def _new_waypoint_id(self) -> str:
+        self._waypoint_counter += 1
+        return f"W_{self._waypoint_counter}"
 
     def get_closest_edge(self, px: float, py: float, max_dist: float = 20.0):
         """
