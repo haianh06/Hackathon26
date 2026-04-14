@@ -37,7 +37,7 @@ def get_rfid_reader():
     return None
 
 from graph.graph_manager import GraphManager
-from graph.pathfinding import compute_shortest_path, compute_multi_stop_path
+from graph.pathfinding import compute_shortest_path, compute_multi_stop_path, compute_sequential_path
 from utils.rfid_simulator import RFIDSimulator
 from ui.canvas import create_parking_lot_map
 from ui.controls import render_sidebar_controls
@@ -62,6 +62,13 @@ if "path_cost" not in st.session_state:
 
 if "click_step" not in st.session_state:
     st.session_state.click_step = 0
+
+if "s_node" not in st.session_state:
+    st.session_state.s_node = None
+if "e_node" not in st.session_state:
+    st.session_state.e_node = None
+if "initial_heading" not in st.session_state:
+    st.session_state.initial_heading = 0
 
 if "manual_last_cmd" not in st.session_state:
     st.session_state.manual_last_cmd = "STOP"
@@ -148,13 +155,12 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                     frame = get_camera_manager().get_frame() if HAS_HW else None
                 
                 if frame is not None:
-                    # Handle Recording
                     if st.session_state.is_recording and st.session_state.video_writer:
-                        # OpenCV VideoWriter expects BGR
+                        # OpenCV VideoWriter expects BGR, frame is BGR natively now
                         st.session_state.video_writer.write(frame)
 
-                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    st.image(rgb, caption="Live Camera Feed", use_container_width=True)
+                    # frame is natively BGR from manager, need RGB for web display
+                    st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), caption="Live Camera Feed", width='stretch')
                 else:
                     st.info("Chờ Camera khởi động...")
             with cam_col2:
@@ -166,7 +172,7 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                 if show_media_controls:
                     st.divider()
                     # Snapshot Button
-                    if st.button("📸 Chụp Ảnh", use_container_width=True, key=f"snap_btn_{key_suffix}"):
+                    if st.button("📸 Chụp Ảnh", width='stretch', key=f"snap_btn_{key_suffix}"):
                         if frame is not None:
                             fname = f"snap_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
                             fpath = os.path.join(SNAP_DIR, fname)
@@ -175,7 +181,7 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                     
                     # Recording Toggle
                     if not st.session_state.is_recording:
-                        if st.button("🔴 Ghi Hình", use_container_width=True, key=f"rec_btn_{key_suffix}"):
+                        if st.button("🔴 Ghi Hình", width='stretch', key=f"rec_btn_{key_suffix}"):
                             fname = f"rec_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
                             fpath = os.path.join(REC_DIR, fname)
                             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -186,7 +192,7 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                             st.rerun()
                     else:
                         st.error(f"⏺️ Đang ghi... ({st.session_state.recording_file})")
-                        if st.button("⏹️ Dừng Ghi", use_container_width=True, key=f"stop_rec_btn_{key_suffix}"):
+                        if st.button("⏹️ Dừng Ghi", width='stretch', key=f"stop_rec_btn_{key_suffix}"):
                             stop_recording()
                             st.rerun()
 
@@ -387,7 +393,7 @@ col3.metric(
 )
 
 
-tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)", "🎮 Điều Khiển WASD", "🚦 Traffic Signs"])
+tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)", "🎮 Điều Khiển WASD", "🛑 Traffic Sign Debug"])
 
 with tab2:
     st.header("⚙️ Calibration — Tốc độ & Thời gian Rẽ")
@@ -609,8 +615,8 @@ with tab1:
         click_action = st.radio(
             "Chế độ nhấp Map:",
             [
-                "🚘 Chọn Lộ Trình (Nhấp 2 điểm)",
-                "🔀 Đi Nhiều Điểm + Về Lại (Multi-Stop Tour)",
+                "🚩 Lập Kế Hoạch Lộ Trình (3 Bước)",
+                "⚪ Ghim điểm hướng dẫn (Waypoint - Không RFID)",
                 "📍 Ghim thẻ RFID mới (Dùng mã đã khai báo ở trên)",
             ],
             horizontal=True,
@@ -618,27 +624,33 @@ with tab1:
         )
 
     # ──────────────────────────────────────────────
-    # MULTI-STOP CONTROL PANEL
+    # ROUTE PLANNING PANEL (3 STEPS)
     # ──────────────────────────────────────────────
-    if click_action == "🔀 Đi Nhiều Điểm + Về Lại (Multi-Stop Tour)":
+    if click_action == "🚩 Lập Kế Hoạch Lộ Trình (3 Bước)":
         with st.container(border=True):
-            st.markdown("### 🔀 Multi-Stop Tour Planner")
+            st.markdown("### 🚩 Lộ Trình Tuần Tự (3 Bước)")
 
             ms_col1, ms_col2 = st.columns([3, 2])
 
             with ms_col1:
-                # Status
+                step = st.session_state.multi_click_step
                 multi_start = st.session_state.multi_start
                 multi_wps = st.session_state.multi_waypoints
 
-                if multi_start is None:
-                    st.info("👇 **Bước 1:** Nhấp vào một node trên bản đồ để chọn **điểm xuất phát**.")
+                if step == 0:
+                    st.info("📍 **Bước 1:** Nhấp vào một node trên bản đồ để chọn **điểm xuất phát**.")
+                elif step == 1:
+                    start_label = gm.graph.nodes[multi_start].get('label', '') or multi_start
+                    st.success(f"🏁 **Xuất phát:** `{multi_start}` ({start_label})")
+                    st.info("🏎️ **Bước 2:** Nhấp vào hướng bất kỳ xung quanh điểm xuất phát để **xoay xe**.")
                 else:
                     start_label = gm.graph.nodes[multi_start].get('label', '') or multi_start
-                    st.success(f"🏁 **Xuất phát:** `{multi_start}` — {start_label}")
+                    st.success(f"🏁 **Xuất phát:** `{multi_start}` ({start_label})")
+                    st.success(f"🏎️ **Hướng:** `{st.session_state.initial_heading}°`")
+                    st.info("🎯 **Bước 3:** Nhấp chọn các **điểm đến** tiếp theo theo thứ tự.")
 
                     if not multi_wps:
-                        st.info("👇 **Bước 2:** Nhấp các node để **thêm điểm ghé thăm** (tùy số lượng). Rồi nhấn 'Tính Lộ Trình'.")
+                        st.info("👇 **Bước 3:** Nhấp chọn các node trên bản đồ để thêm vào lộ trình. Rồi nhấn 'Tính Lộ Trình'.")
                     else:
                         st.markdown(f"**Điểm ghé thăm đã chọn ({len(multi_wps)} điểm):**")
                         for i, wp in enumerate(multi_wps):
@@ -672,8 +684,8 @@ with tab1:
                     type="primary",
                     help="Cần chọn điểm xuất phát và ít nhất 1 điểm ghé thăm"
                 ):
-                    with st.spinner("Đang tính toán lộ trình tối ưu..."):
-                        full_path, total_cost, visit_order, is_exact = compute_multi_stop_path(
+                    with st.spinner("Đang tính toán lộ trình theo thứ tự..."):
+                        full_path, total_cost, visit_order = compute_sequential_path(
                             gm,
                             st.session_state.multi_start,
                             st.session_state.multi_waypoints,
@@ -682,13 +694,12 @@ with tab1:
                     if not full_path:
                         st.error("❌ Không thể tính lộ trình! Kiểm tra xem các node có kết nối không.")
                     else:
-                        # Compute segment_breaks (index in full_path where each leg starts)
+                        # Compute segment_breaks
                         full_seq = [st.session_state.multi_start] + visit_order
                         breaks = [0]
                         pos = 0
                         for seg_idx in range(1, len(full_seq)):
                             target = full_seq[seg_idx]
-                            # Find where target appears in full_path after `pos`
                             for k in range(pos, len(full_path)):
                                 if full_path[k] == target:
                                     breaks.append(k)
@@ -704,7 +715,14 @@ with tab1:
                         sim.start_route(full_path)
                         st.rerun()
 
-                if st.button("🔄 Reset Multi-Stop", width='stretch'):
+                if st.button("⏪ Quay lại bước trước", width='stretch', disabled=(step == 0)):
+                    st.session_state.multi_click_step -= 1
+                    if st.session_state.multi_click_step == 0:
+                        st.session_state.multi_start = None
+                        st.session_state.s_node = None
+                    st.rerun()
+
+                if st.button("🔄 Reset Tất Cả", width='stretch'):
                     st.session_state.multi_start = None
                     st.session_state.multi_waypoints = []
                     st.session_state.tour_visit_order = []
@@ -721,7 +739,7 @@ with tab1:
     # RENDER MAP
     # ──────────────────────────────────────────────
     # In multi-stop mode, pass waypoints and tour info to canvas
-    is_multi_mode = (click_action == "🔀 Đi Nhiều Điểm + Về Lại (Multi-Stop Tour)")
+    is_multi_mode = (click_action == "🚩 Lập Kế Hoạch Lộ Trình (3 Bước)")
     canvas_waypoints = st.session_state.multi_waypoints if is_multi_mode else []
     canvas_visit_order = st.session_state.tour_visit_order if is_multi_mode else []
     canvas_breaks = st.session_state.segment_breaks if is_multi_mode else []
@@ -729,12 +747,13 @@ with tab1:
     fig = create_parking_lot_map(
         gm,
         st.session_state.current_path,
-        st.session_state.get('s_node') if is_multi_mode else start_node,
-        None if is_multi_mode else end_node,
+        st.session_state.get('s_node') if is_multi_mode else st.session_state.s_node,
+        None if is_multi_mode else st.session_state.e_node,
         current_node,
         waypoints=canvas_waypoints,
         visit_order=canvas_visit_order,
         segment_breaks=canvas_breaks,
+        initial_heading=st.session_state.get("initial_heading")
     )
 
     try:
@@ -745,8 +764,88 @@ with tab1:
                 node_id = pts[0].get('customdata')
                 clk_x, clk_y = pts[0]['x'], pts[0]['y']
 
+                # ── Mode: Waypoint ────────────────────────────────────────
+                if click_action == "⚪ Ghim điểm hướng dẫn (Waypoint - Không RFID)":
+                    if node_id is not None and str(node_id) in gm.graph:
+                        st.error("⚠️ Vị trí này đã có node rồi!")
+                    else:
+                        # Suggest a split if clicked on edge
+                        edge, proj = gm.get_closest_edge(clk_x, clk_y)
+                        if edge:
+                            w_id = gm._new_waypoint_id()
+                            # Manually split edge but with is_rfid=False
+                            original_weight = gm.graph[edge[0]][edge[1]].get("weight", 1.0)
+                            x0, y0 = gm.graph.nodes[edge[0]]["x"], gm.graph.nodes[edge[0]]["y"]
+                            x1, y1 = gm.graph.nodes[edge[1]]["x"], gm.graph.nodes[edge[1]]["y"]
+                            total_len = math.hypot(x1 - x0, y1 - y0) or 1.0
+                            w1 = original_weight * math.hypot(proj[0] - x0, proj[1] - y0) / total_len
+                            w2 = original_weight * math.hypot(x1 - proj[0], y1 - proj[1]) / total_len
+
+                            gm.graph.remove_edge(edge[0], edge[1])
+                            gm.add_node(proj[0], proj[1], w_id, label="", is_rfid=False)
+                            gm.add_edge(edge[0], w_id, weight=w1)
+                            gm.add_edge(w_id, edge[1], weight=w2)
+                            st.success(f"✅ Đã chia Edge và chèn Waypoint **{w_id}**")
+                        else:
+                            # Create standalone waypoint
+                            w_id = gm._new_waypoint_id()
+                            gm.add_node(clk_x, clk_y, w_id, label="", is_rfid=False)
+                            st.success(f"✅ Đã thêm Waypoint **{w_id}** tại ({clk_x:.1f}, {clk_y:.1f})")
+                        st.rerun()
+
+                # ── Mode: Lập Kế Hoạch 3 Bước ──────────────────────────────
+                if click_action == "🚩 Lập Kế Hoạch Lộ Trình (3 Bước)":
+                    step = st.session_state.multi_click_step
+                    
+                    if step == 0:
+                        # Bước 1: Chọn điểm xuất phát
+                        if not node_id or str(node_id) not in gm.graph:
+                            edge, proj = gm.get_closest_edge(clk_x, clk_y)
+                            if edge:
+                                node_id = gm.create_virtual_node_on_edge(proj[0], proj[1], edge[0], edge[1])
+                        
+                        if node_id and str(node_id) in gm.graph:
+                            st.session_state.multi_start = node_id
+                            st.session_state.s_node = node_id
+                            st.session_state.multi_click_step = 1
+                            st.rerun()
+                    
+                    elif step == 1:
+                        # Bước 2: Chọn hướng xe
+                        s_coords = gm.graph.nodes[st.session_state.s_node]
+                        sx, sy = s_coords['x'], s_coords['y']
+                        dx = clk_x - sx
+                        dy = clk_y - sy
+                        
+                        if abs(dx) > abs(dy):
+                            heading = 0 if dx > 0 else 180
+                        else:
+                            heading = 90 if dy > 0 else 270
+                        
+                        st.session_state.initial_heading = heading
+                        st.session_state.multi_click_step = 2
+                        st.rerun()
+                    
+                    elif step == 2:
+                        # Bước 3: Chọn các điểm đến
+                        if not node_id or str(node_id) not in gm.graph:
+                            edge, proj = gm.get_closest_edge(clk_x, clk_y)
+                            if edge:
+                                node_id = gm.create_virtual_node_on_edge(proj[0], proj[1], edge[0], edge[1])
+
+                        if node_id and str(node_id) in gm.graph:
+                            node_id = str(node_id)
+                            if node_id == st.session_state.multi_start:
+                                st.toast("⚠️ Điểm xuất phát đã được chọn.", icon="⚠️")
+                            elif node_id in st.session_state.multi_waypoints:
+                                st.toast(f"ℹ️ Node `{node_id}` đã có trong danh sách.", icon="ℹ️")
+                            else:
+                                st.session_state.multi_waypoints.append(node_id)
+                                st.session_state.current_path = [] 
+                                st.rerun()
+
                 # ── Mode: RFID Pin ────────────────────────────────────────
-                if click_action == "📍 Ghim thẻ RFID mới (Dùng mã đã khai báo ở trên)":
+                elif click_action == "📍 Ghim thẻ RFID mới (Dùng mã đã khai báo ở trên)":
                     pending = st.session_state.rfid_pending
                     if node_id is not None and str(node_id) in gm.graph:
                         st.error("⚠️ Trùng vị trí! Hãy nhấp ra chỗ trống trên bản đồ.")
@@ -764,68 +863,6 @@ with tab1:
                             st.session_state.last_scanned_uid = ""
                             st.rerun()
 
-                # ── Mode: Multi-Stop ──────────────────────────────────────
-                elif click_action == "🔀 Đi Nhiều Điểm + Về Lại (Multi-Stop Tour)":
-                    # Resolve node (create virtual if blank area clicked)
-                    if not node_id or str(node_id) not in gm.graph:
-                        edge, proj = gm.get_closest_edge(clk_x, clk_y)
-                        if edge:
-                            node_id = gm.create_virtual_node_on_edge(proj[0], proj[1], edge[0], edge[1])
-
-                    if node_id and str(node_id) in gm.graph:
-                        node_id = str(node_id)
-                        if st.session_state.multi_start is None:
-                            # First click → set start
-                            st.session_state.multi_start = node_id
-                            st.session_state.multi_waypoints = []
-                            st.session_state.tour_visit_order = []
-                            st.session_state.segment_breaks = []
-                            st.session_state.current_path = []
-                            st.session_state.path_cost = 0.0
-                            st.session_state.s_node = node_id
-                            st.session_state.e_node = None
-                            sim.reset()
-                            st.rerun()
-                        else:
-                            # Subsequent clicks → add waypoints
-                            if node_id == st.session_state.multi_start:
-                                st.toast("⚠️ Điểm xuất phát đã được chọn. Hãy chọn điểm khác.", icon="⚠️")
-                            elif node_id in st.session_state.multi_waypoints:
-                                st.toast(f"ℹ️ Node `{node_id}` đã trong danh sách rồi.", icon="ℹ️")
-                            else:
-                                st.session_state.multi_waypoints.append(node_id)
-                                # Clear previous result when waypoints change
-                                st.session_state.current_path = []
-                                st.session_state.tour_visit_order = []
-                                st.session_state.segment_breaks = []
-                                st.session_state.path_cost = 0.0
-                                st.rerun()
-
-                # ── Mode: 2-Point Route ───────────────────────────────────
-                else:
-                    if not node_id or str(node_id) not in gm.graph:
-                        edge, proj = gm.get_closest_edge(clk_x, clk_y)
-                        if edge:
-                            node_id = gm.create_virtual_node_on_edge(proj[0], proj[1], edge[0], edge[1])
-
-                    if node_id and str(node_id) in gm.graph:
-                        if st.session_state.click_step == 0:
-                            st.session_state.s_node = str(node_id)
-                            st.session_state.e_node = None
-                            st.session_state.current_path = []
-                            sim.reset()
-                            st.session_state.click_step = 1
-                        else:
-                            st.session_state.e_node = str(node_id)
-                            path, cost = compute_shortest_path(gm, st.session_state.s_node, st.session_state.e_node, algo if 'algo' in dir() else "Dijkstra")
-                            st.session_state.current_path = path
-                            st.session_state.path_cost = cost
-                            st.session_state.tour_visit_order = []
-                            st.session_state.segment_breaks = []
-                            sim.start_route(path)
-                            st.session_state.click_step = 0
-                        st.rerun()
-
     except TypeError:
         st.plotly_chart(fig, width='stretch')
 
@@ -838,13 +875,14 @@ with tab1:
         if not all_nodes:
             st.info("Chưa có thẻ RFID nào được đăng ký. Hãy ghim thẻ đầu tiên lên bản đồ.")
         else:
-            hdr = st.columns([2, 3, 1.2, 1.2, 1.2, 1.2])
-            hdr[0].markdown("**🆔 ID Thẻ**")
+            hdr = st.columns([1.5, 3, 1.5, 1.2, 1.2, 1, 1])
+            hdr[0].markdown("**🆔 Node ID**")
             hdr[1].markdown("**🏷️ Tên vị trí**")
-            hdr[2].markdown("**X**")
-            hdr[3].markdown("**Y**")
-            hdr[4].markdown("**Sửa**")
-            hdr[5].markdown("**Xóa**")
+            hdr[2].markdown("**🏢 Loại**")
+            hdr[3].markdown("**X**")
+            hdr[4].markdown("**Y**")
+            hdr[5].markdown("**Sửa**")
+            hdr[6].markdown("**Xóa**")
             st.divider()
 
             editing = st.session_state.editing_node
@@ -868,11 +906,18 @@ with tab1:
                             st.session_state.editing_node = None
                             st.rerun()
                 else:
-                    row = st.columns([2, 3, 1.2, 1.2, 1.2, 1.2])
+                    is_rfid = ndata.get('is_rfid', True)
+                    row = st.columns([1.5, 3, 1.5, 1.2, 1.2, 1, 1])
                     row[0].code(str(node_id))
                     uids = ndata.get('uids', [node_id])
                     with row[1]:
                         st.write(ndata.get('label', '—') or '—')
+                    
+                    with row[2]:
+                        if is_rfid:
+                            st.info("RFID", icon="🎟️")
+                        else:
+                            st.write("Waypoint ⚪")
                         
                         # List UIDs with small delete buttons for secondary ones
                         uid_cols = st.columns([1, 1, 1])
@@ -912,7 +957,7 @@ with tab1:
                         )
                         
                         if HAS_RFID:
-                            if col_scan.button("🔍 Quét", key=f"scan_btn_{node_id}", help="Quét thẻ để gán vào node này", use_container_width=True):
+                            if col_scan.button("🔍 Quét", key=f"scan_btn_{node_id}", help="Quét thẻ để gán vào node này", width='stretch'):
                                 with st.spinner(f"Đang chờ thẻ cho {node_id}..."):
                                     reader = get_rfid_reader()
                                     try:
@@ -928,14 +973,14 @@ with tab1:
                                     except Exception as e:
                                         st.error(f"Lỗi: {e}")
                         else:
-                            col_scan.button("🔍 Quét", disabled=True, key=f"scan_btn_off_{node_id}", use_container_width=True)
+                            col_scan.button("🔍 Quét", disabled=True, key=f"scan_btn_off_{node_id}", width='stretch')
 
-                    row[2].write(f"{ndata['x']:.1f}")
-                    row[3].write(f"{ndata['y']:.1f}")
-                    if row[4].button("✏️", key=f"edit_btn_{node_id}", help="Sửa node này"):
+                    row[3].write(f"{ndata['x']:.1f}")
+                    row[4].write(f"{ndata['y']:.1f}")
+                    if row[5].button("✏️", key=f"edit_btn_{node_id}", help="Sửa node này"):
                         st.session_state.editing_node = node_id
                         st.rerun()
-                    if row[5].button("🗑️", key=f"del_btn_{node_id}", help="Xóa node này"):
+                    if row[6].button("🗑️", key=f"del_btn_{node_id}", help="Xóa node này"):
                         gm.delete_node(node_id)
                         if st.session_state.get('s_node') == node_id:
                             st.session_state.s_node = None
@@ -951,9 +996,28 @@ with tab1:
     # ──────────────────────────────────────────────
     # SECTION 3: Turn Instructions & Path Display
     # ──────────────────────────────────────────────
-    def compute_turn_instructions(path, gm):
+    def compute_turn_instructions(path, gm, initial_heading=None):
         if len(path) < 2: return "Đã ở đích"
         instructions = []
+        
+        # New: Initial Turn from starting orientation
+        if initial_heading is not None:
+            curr = path[0]
+            nxt = path[1]
+            if curr in gm.graph.nodes and nxt in gm.graph.nodes:
+                dx = gm.graph.nodes[nxt]['x'] - gm.graph.nodes[curr]['x']
+                dy = gm.graph.nodes[nxt]['y'] - gm.graph.nodes[curr]['y']
+                target_ang = math.degrees(math.atan2(dy, dx))
+                
+                diff = (target_ang - initial_heading) % 360
+                if diff > 180: diff -= 360
+                
+                if -25 <= diff <= 25: turn = "Hướng ban đầu: Đã đúng hướng ⬆️"
+                elif 25 < diff <= 135: turn = "Hướng ban đầu: Cần rẽ TRÁI ⬅️"
+                elif -135 <= diff < -25: turn = "Hướng ban đầu: Cần rẽ PHẢI ➡️"
+                else: turn = "Hướng ban đầu: Ngược hướng, cần QUAY ĐẦU ⬇️"
+                instructions.append(f"• **Bắt đầu**: {turn}")
+
         for i in range(1, len(path)-1):
             prev = path[i-1]
             curr = path[i]
@@ -1025,7 +1089,7 @@ with tab1:
             st.success("Lộ trình dạng Chuỗi Điểm (Sequence):")
             st.code(" → ".join(st.session_state.current_path))
 
-        st.info("Hệ lệnh Rẽ cho Robot (Turns):\n" + compute_turn_instructions(st.session_state.current_path, gm))
+        st.info("Hệ lệnh Rẽ cho Robot (Turns):\n" + compute_turn_instructions(st.session_state.current_path, gm, st.session_state.get("initial_heading")))
 
         if HAS_HW:
             st.write("---")
@@ -1064,6 +1128,7 @@ with tab1:
                     rfid_map=rfid_map,
                     turn_config=st.session_state.turn_config,
                     predefined_path=st.session_state.current_path,
+                    initial_heading=st.session_state.get("initial_heading", 0),
                 )
                 st.session_state.car_instance = car
                 st.session_state.car_thread = threading.Thread(target=car.execute, daemon=True)
@@ -1084,81 +1149,64 @@ with tab3:
     # Optimized Manual Controls in a separate fragment to prevent camera flickering
     render_wasd_manual_controls()
 
+
 with tab4:
-    st.header("🚦 Traffic Sign Detection Calibration")
-    
-    from utils.traffic_sign_recognition import TrafficSignRecognition
-    if 'tsr_instance' not in st.session_state:
-        st.session_state.tsr_instance = TrafficSignRecognition()
-    
-    tsr = st.session_state.tsr_instance
-    
-    col_t1, col_t2 = st.columns([1, 1])
-    
-    with col_t1:
-        st.subheader("🎨 HSV Thresholding (Blue Detection)")
-        h_low = st.slider("H Lower", 0, 180, int(tsr.hsv_lower[0]))
-        s_low = st.slider("S Lower", 0, 255, int(tsr.hsv_lower[1]))
-        v_low = st.slider("V Lower", 0, 255, int(tsr.hsv_lower[2]))
+    st.header("🛑 Traffic Sign Realtime Debugger")
+    st.info("Tab này kéo trực tiếp frame từ luồng camera để phân tích độc lập giúp bạn dễ dàng hiệu chỉnh thông số màu sắc của các biển báo.")
+    if HAS_HW:
+        from core.detector import SignDetector
+        from core.classifier import SignClassifier
         
-        h_up = st.slider("H Upper", 0, 180, int(tsr.hsv_upper[0]))
-        s_up = st.slider("S Upper", 0, 255, int(tsr.hsv_upper[1]))
-        v_up = st.slider("V Upper", 0, 255, int(tsr.hsv_upper[2]))
-        
-        if st.button("💾 Save HSV Config"):
-            tsr.hsv_lower = np.array([h_low, s_low, v_low], dtype=np.uint8)
-            tsr.hsv_upper = np.array([h_up, s_up, v_up], dtype=np.uint8)
-            tsr.save_config()
-            st.success("HSV Config Saved!")
-
-    with col_t2:
-        st.subheader("📐 Shape & Confidence")
-        min_area = st.number_input("Min Area", 10, 100000, int(tsr.min_area))
-        circ_thresh = st.slider("Circularity Threshold", 0.0, 1.0, float(tsr.circularity_threshold), 0.05)
-        conf_thresh = st.slider("Confidence Threshold", 0.0, 1.0, float(tsr.confidence_threshold), 0.05)
-        
-        if st.button("💾 Save Shape Config"):
-            tsr.min_area = min_area
-            tsr.circularity_threshold = circ_thresh
-            tsr.confidence_threshold = conf_thresh
-            tsr.save_config()
-            st.success("Shape Config Saved!")
-
-    st.divider()
-    st.subheader("🖼️ Template Management")
-    t_cols = st.columns(4)
-    signs = ['straight', 'left', 'right', 'parking']
-    filenames = ['up.png', 'left.png', 'right.png', 'p.png']
-    
-    for i, sign in enumerate(signs):
-        with t_cols[i]:
-            st.write(f"**{sign.upper()}**")
-            temp_path = tsr.templates_dir / filenames[i]
-            if temp_path.exists():
-                st.image(str(temp_path), width=100)
-            else:
-                st.warning("Missing")
+        if "debug_sign_detector" not in st.session_state:
+            st.session_state.debug_sign_detector = SignDetector()
+            st.session_state.debug_sign_classifier = SignClassifier(templates_dir='templates')
             
-            uploaded_file = st.file_uploader(f"Upload {filenames[i]}", type=['png', 'jpg'], key=f"upload_{sign}")
-            if uploaded_file is not None:
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                st.success(f"Uploaded {filenames[i]}")
-                tsr.load_templates()
-                st.rerun()
-
-    st.divider()
-    st.subheader("🎥 Live Detection Test")
-    if st.checkbox("Enable Live Detection Overlay"):
-        test_frame = get_camera_manager().get_frame()
-        if test_frame is not None:
-            results = tsr.detect_and_classify(test_frame)
-            annotated = tsr.draw_detections(test_frame, results)
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Live Detection Preview")
-            if results:
-                for r in results:
-                    st.write(f"✅ **{r['label'].upper()}** - Confidence: {r['confidence']:.2f}")
-        else:
-            st.info("Wait for camera...")
+        sign_det = st.session_state.debug_sign_detector
+        sign_cls = st.session_state.debug_sign_classifier
+        
+        @st.fragment(run_every=0.5)
+        def render_traffic_sign_debug():
+            frame = get_camera_manager().get_frame() if HAS_HW else None
+            if frame is not None:
+                # frame is BGR natively from manager
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                detected_signs, mask = sign_det.get_detection_with_mask(rgb_frame)
+                
+                annotated = frame.copy()
+                detection_logs = []
+                
+                if detected_signs:
+                    for idx, (roi, bbox) in enumerate(detected_signs):
+                        sign_type, conf = sign_cls.classify(roi)
+                        if conf >= 0.1:
+                            x, y, w, h = bbox
+                            cv2.rectangle(annotated, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                            cv2.putText(annotated, f"{sign_type.upper()}: {conf:.2f}", (x, max(15, y - 10)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                            log_msg = f"✅ Phát hiện biển **{sign_type.upper()}** (Độ tin cậy: {conf*100:.1f}%) tại toạ độ {bbox}"
+                            detection_logs.append(log_msg)
+                            
+                            # Thuận theo request "Luôn ghi ra log"
+                            print(f"[TRAFFIC-SIGN-DEBUG] Detected {sign_type.upper()} ({conf*100:.1f}%)")
+                            
+                st.markdown("### Luồng phân tích (Realtime)")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Camera + Detections", use_container_width=True)
+                with col2:
+                    st.image(mask, caption="HSV Blue Mask", use_container_width=True, clamp=True)
+                    
+                st.markdown("### Nhật ký Mới nhất:")
+                if detection_logs:
+                    for log in detection_logs:
+                        st.success(log)
+                else:
+                    st.caption("Chưa phát hiện biển báo nào. Vui lòng đưa biển báo vào luồng camera...")
+            else:
+                st.warning("Camera chưa sẵn sàng.")
+                
+        render_traffic_sign_debug()
+    else:
+        st.error("Tính năng này yêu cầu Hardware Camera hoạt động.")
 
 # ── End of App ────────────────────────────────────────────────────────────────

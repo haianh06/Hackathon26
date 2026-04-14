@@ -6,7 +6,7 @@ import hardware.motor as motor
 import cv2
 import numpy as np
 from hardware.camera import camera_manager
-from utils.traffic_sign_recognition import TrafficSignRecognition
+
 
 class CarState(Enum):
     IDLE = auto()
@@ -16,13 +16,14 @@ class CarState(Enum):
     ARRIVED = auto()
 
 class AutonomousCar:
-    def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None):
+    def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None, initial_heading=0):
         self.nav = NavEngine(graph, turn_table)
         self.target_node = target_node
         self.rfid_map = rfid_map
         self.turn_config = turn_config
         self.predefined_path = predefined_path
-        self.tsr = TrafficSignRecognition()
+        self.initial_heading = initial_heading
+
         self.prev_node = None
         self.current_node = predefined_path[0] if predefined_path else None
         self.next_node = None
@@ -36,10 +37,27 @@ class AutonomousCar:
         self.base_speed = 120
         self.target_right = 300
         self.target_left = 50
-        self.scan_y_left = 0.45        # New ratio from HD
+        self.scan_y_left = 0.45       # New ratio from HD
         self.scan_y_right = 0.62       # New ratio from HD
         self.scan_search_up_rows = 35  # Scanning range
         self.debug_frame = None        # Stores visualized frame for the UI
+
+        # Traffic Sign Detection Integration
+        try:
+            from core.detector import SignDetector
+            from core.classifier import SignClassifier
+            self.sign_detector = SignDetector()
+            self.sign_classifier = SignClassifier(templates_dir='templates')
+            self.has_sign_detection = True
+            # self._log will be used when actived, we can just print here
+            print("[INIT] Traffic Sign Detection module loaded successfully.")
+        except Exception as e:
+            print(f"Failed to initialize sign detection: {e}")
+            self.has_sign_detection = False
+            
+        self.last_sign_detect_time = 0.0
+        self.sign_detect_interval = 0.5  # Run detection every 0.5 seconds
+        self.last_detected_signs = []    # Cache to display on UI between detections
 
     @property
     def rfid(self):
@@ -68,7 +86,19 @@ class AutonomousCar:
         if uid in self.rfid_map:
             detected = self.rfid_map[uid]
             if detected != self.current_node:
-                self.prev_node = self.current_node
+                # Optimized prev_node logic: Use actual predecessor in path for accurate turn geometry
+                if self.predefined_path and detected in self.predefined_path:
+                    try:
+                        idx = self.predefined_path.index(detected)
+                        if idx > 0:
+                            self.prev_node = self.predefined_path[idx-1]
+                        else:
+                            self.prev_node = self.current_node
+                    except ValueError:
+                        self.prev_node = self.current_node
+                else:
+                    self.prev_node = self.current_node
+                
                 self.current_node = detected
                 self._log(f"[RFID] Phát hiện node: {detected}")
                 self.state = CarState.PLANNING
@@ -102,10 +132,15 @@ class AutonomousCar:
                     self.state = CarState.MOVING
 
         elif self.state == CarState.TURNING:
-            if self.prev_node and self.current_node and self.next_node:
+            if self.prev_node is None and self.current_node and self.next_node:
+                # First node: handle initial orientation
+                action = self.nav.get_initial_action(self.current_node, self.next_node, self.initial_heading)
+                self._log(f"[INIT-TURN] Hướng: {self.initial_heading}° | Hành động: {action}")
+            elif self.prev_node and self.current_node and self.next_node:
                 action = self.nav.get_action(self.prev_node, self.current_node, self.next_node)
             else:
                 action = "STRAIGHT"
+            
             self._log(f"[TURN] Hành động: {action}")
             self.execute_motor_action(action)
             self.state = CarState.MOVING
@@ -142,8 +177,40 @@ class AutonomousCar:
         elif self.last_right_x != -1:
             right_x = self.last_right_x
 
+        # --- Traffic Sign Detection ---
+        current_time = time.time()
+        if self.has_sign_detection and (current_time - self.last_sign_detect_time) > self.sign_detect_interval:
+            self.last_sign_detect_time = current_time
+            # detect_signs expects RGB and raw_frame is natively BGR from camera module
+            rgb_frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
+            detected_signs = self.sign_detector.detect_signs(rgb_frame)
+            
+            self.last_detected_signs = []
+            if detected_signs:
+                for idx, (roi, bbox) in enumerate(detected_signs):
+                    sign_type, confidence = self.sign_classifier.classify(roi)
+                    if confidence >= 0.5: # Only consider reasonably confident detections
+                        self.last_detected_signs.append((sign_type, confidence, bbox))
+                        log_msg = f"[VISION] Detected {sign_type.upper()} sign ({confidence*100:.1f}%)"
+                        self._log(log_msg)
+                        print(log_msg)
+
         # --- Visualization Logic (HD) ---
         display_frame = frame.copy()
+        
+        # Overlay Traffic Signs (Scale bbox from raw_frame to display_frame)
+        raw_h, raw_w = raw_frame.shape[:2]
+        h_ratio = 240 / raw_h
+        w_ratio = 320 / raw_w
+        for sign_type, conf, (rx, ry, rw, rh) in self.last_detected_signs:
+            x = int(rx * w_ratio)
+            y = int(ry * h_ratio)
+            w = int(rw * w_ratio)
+            h = int(rh * h_ratio)
+            cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 255), 2)
+            cv2.putText(display_frame, f"{sign_type} {int(conf*100)}%", (x, max(15, y - 5)), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
         self._draw_lane_overlay(display_frame, left_x, y_left, right_x, y_right)
         
         # Metadata drawings
@@ -185,12 +252,7 @@ class AutonomousCar:
         # Update debug frame for Streamlit
         self.debug_frame = display_frame
 
-        # --- Traffic Sign Detection ---
-        signs = self.tsr.detect_and_classify(frame)
-        if signs:
-            self.debug_frame = self.tsr.draw_detections(self.debug_frame, signs)
-            for s in signs:
-                self._log(f"[SIGN] Phát hiện: {s['label'].upper()} ({s['confidence']*100:.1f}%)")
+
 
         # Motor control
         if mode in ["right", "left"]:

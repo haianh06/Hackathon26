@@ -17,6 +17,7 @@ class GraphManager:
     def __init__(self):
         self.graph: nx.Graph = nx.Graph()
         self._counter: int = 0          # used to generate unique virtual-node IDs
+        self._waypoint_counter: int = 0 # used for persistent Waypoint node IDs
         self.speed_px_per_sec: float = 5.0
 
     # ─────────────────────────── Persistence ────────────────────────────────
@@ -31,6 +32,7 @@ class GraphManager:
 
         self.graph.clear()
         self._counter = data.get("counter", 0)
+        self._waypoint_counter = data.get("waypoint_counter", 0)
         self.speed_px_per_sec = data.get("speed_px_per_sec", 5.0)
 
         for node_id, attrs in data.get("nodes", {}).items():
@@ -58,6 +60,7 @@ class GraphManager:
             "nodes": nodes,
             "edges": edges,
             "counter": self._counter,
+            "waypoint_counter": self._waypoint_counter,
             "speed_px_per_sec": self.speed_px_per_sec,
         }
         with open(path, "w") as f:
@@ -68,9 +71,10 @@ class GraphManager:
 
     # ──────────────────────────── Node CRUD ─────────────────────────────────
 
-    def add_node(self, x: float, y: float, node_id: str, label: str = ""):
-        """Add a new RFID node at the given map coordinates."""
-        self.graph.add_node(node_id, x=float(x), y=float(y), label=label, uids=[node_id])
+    def add_node(self, x: float, y: float, node_id: str, label: str = "", is_rfid: bool = True):
+        """Add a new node (RFID or Waypoint) at the given map coordinates."""
+        uids = [node_id] if is_rfid else []
+        self.graph.add_node(node_id, x=float(x), y=float(y), label=label, uids=uids, is_rfid=is_rfid)
         self._auto_save()
 
     def edit_node(self, node_id: str, x: float, y: float, label: str):
@@ -181,6 +185,10 @@ class GraphManager:
     def _new_virtual_id(self) -> str:
         self._counter += 1
         return f"V_{self._counter}"
+
+    def _new_waypoint_id(self) -> str:
+        self._waypoint_counter += 1
+        return f"W_{self._waypoint_counter}"
 
     def get_closest_edge(self, px: float, py: float, max_dist: float = 20.0):
         """

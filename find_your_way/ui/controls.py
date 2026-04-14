@@ -38,7 +38,7 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
             edge_w = st.number_input("Trọng số (Weight)", value=1.0, min_value=0.1, step=0.5, key="edge_w")
 
             e_col1, e_col2 = st.columns(2)
-            if e_col1.button("➕ Thêm Edge", use_container_width=True):
+            if e_col1.button("➕ Thêm Edge", width='stretch'):
                 if edge_u == edge_v:
                     st.error("Không thể nối một node với chính nó!")
                 elif gm.graph.has_edge(edge_u, edge_v):
@@ -48,7 +48,7 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
                     st.success(f"✅ Đã thêm edge {edge_u} ↔ {edge_v}")
                     st.rerun()
 
-            if e_col2.button("🗑️ Xóa Edge", use_container_width=True):
+            if e_col2.button("🗑️ Xóa Edge", width='stretch'):
                 if gm.graph.has_edge(edge_u, edge_v):
                     gm.delete_edge(edge_u, edge_v)
                     st.success(f"✅ Đã xóa edge {edge_u} ↔ {edge_v}")
@@ -83,7 +83,7 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
                 f"Kết nối: {gm.graph.degree(del_node_id)} edge(s)"
             )
 
-            if st.button("🗑️ Xóa Node này", use_container_width=True, type="primary"):
+            if st.button("🗑️ Xóa Node này", width='stretch', type="primary"):
                 gm.delete_node(del_node_id)
                 # Clear from session state if it was start/end/current node
                 if st.session_state.get("s_node") == del_node_id:
@@ -111,7 +111,7 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
         else:
             st.info("Chưa có lộ trình. Nhấp 2 điểm trên bản đồ.")
 
-        if st.button("🔄 Reset Lộ Trình", use_container_width=True):
+        if st.button("🔄 Reset Lộ Trình", width='stretch'):
             st.session_state.current_path = []
             st.session_state.path_cost = 0.0
             st.session_state.s_node = None
@@ -142,7 +142,7 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
         else:
             st.warning(f"⚠️ Có **{n_virtual}** node ảo đang tồn tại trên bản đồ.")
 
-            if st.button("🗑️ Xóa Tất Cả Node Ảo", use_container_width=True, type="primary"):
+            if st.button("🗑️ Xóa Tất Cả Node Ảo", width='stretch', type="primary"):
                 removed = gm.clear_virtual_nodes()
                 # Clear route state because virtual nodes may be part of current path
                 st.session_state.current_path = []
@@ -181,7 +181,7 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
 
         # ── Save / Load ──────────────────────────────────────────────────
         st.subheader("💾 Lưu / Tải Bản Đồ")
-        if st.button("💾 Lưu Map ngay", use_container_width=True):
+        if st.button("💾 Lưu Map ngay", width='stretch'):
             gm._auto_save()
             st.success("Đã lưu!")
 
