@@ -61,11 +61,18 @@ def run_camera_display():
     try:
         from picamera2 import Picamera2
         picam2 = Picamera2()
-        # Cấu hình kích thước và định dạng màu RGB888
-        config = picam2.create_preview_configuration()
+        # Align with HD standalone script: dynamic scaling to preserve wide FOV
+        sensor_res = picam2.sensor_resolution
+        scale = 800 / sensor_res[0] if sensor_res[0] > 800 else 1.0
+        target_size = (int(sensor_res[0] * scale), int(sensor_res[1] * scale))
+        
         picam2.configure(config)
+        try:
+            if "LensPosition" in picam2.controls:
+                picam2.set_controls({"LensPosition": 0.5})
+        except: pass
         picam2.start()
-        print("📸 libcamera Stream Started (Picamera2).")
+        print(f"📸 libcamera Stream Started ({target_size[0]}x{target_size[1]}).")
 
         while running:
             try:

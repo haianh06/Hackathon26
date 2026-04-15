@@ -77,6 +77,10 @@ def main():
         scale = 800 / sensor_res[0] if sensor_res[0] > 800 else 1.0
         config = picam2.create_preview_configuration(main={"size": (int(sensor_res[0]*scale), int(sensor_res[1]*scale)), "format": "RGB888"})
         picam2.configure(config)
+        try:
+            if "LensPosition" in picam2.controls:
+                picam2.set_controls({"LensPosition": 0.5})
+        except: pass
         picam2.start()
         print("📸 Camera Stream Started (Picamera2).")
     except Exception as e:
