@@ -12,25 +12,12 @@ from pathlib import Path
 
 
 class SignClassifier:
-    """
-    Classifies detected traffic signs using Template Matching and HOG features.
-    
-    Primary method: Template Matching with normalized cross-correlation
-    Fallback/Secondary: HOG features for more robust classification
-    """
+    """Classifies traffic signs using Template Matching and HOG."""
     
     def __init__(self, 
                  templates_dir: str = 'templates',
                  template_size: Tuple[int, int] = (64, 64),
                  template_matching_threshold: float = 0.7):
-        """
-        Initialize the SignClassifier.
-        
-        Args:
-            templates_dir (str): Path to directory containing template images
-            template_size (Tuple[int, int]): Size to resize templates for matching
-            template_matching_threshold (float): Confidence threshold for template matching (0.0-1.0)
-        """
         self.templates_dir = Path(templates_dir)
         self.template_size = template_size
         self.threshold = template_matching_threshold

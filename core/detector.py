@@ -11,12 +11,7 @@ from typing import List, Tuple
 
 
 class SignDetector:
-    """
-    Detects blue circular traffic signs in an image.
-    
-    Uses HSV color space to mask blue colors and contour detection with
-    circularity filtering to identify circular signs.
-    """
+    """Detects blue circular traffic signs using HSV and contours."""
     
     def __init__(self, 
                  hsv_lower: Tuple[int, int, int] = (90, 50, 50),
@@ -24,16 +19,6 @@ class SignDetector:
                  min_area: int = 500,
                  max_area: int = 50000,
                  circularity_threshold: float = 0.4):
-        """
-        Initialize the SignDetector.
-        
-        Args:
-            hsv_lower (Tuple[int, int, int]): Lower HSV threshold for blue color (H, S, V)
-            hsv_upper (Tuple[int, int, int]): Upper HSV threshold for blue color (H, S, V)
-            min_area (int): Minimum contour area to consider as a sign
-            max_area (int): Maximum contour area to consider as a sign
-            circularity_threshold (float): Minimum circularity (0.0-1.0) for circular signs
-        """
         self.hsv_lower = np.array(hsv_lower, dtype=np.uint8)
         self.hsv_upper = np.array(hsv_upper, dtype=np.uint8)
         self.min_area = min_area

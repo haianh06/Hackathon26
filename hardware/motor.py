@@ -27,7 +27,6 @@ def _set_pwm(pin, us):
         duty = (us / 20000) * 100
         lgpio.tx_pwm(h, pin, PWM_FREQ, duty)
     except lgpio.error as e:
-        # If pin not set as output, try to claim it again and retry once
         if "not set as an output" in str(e).lower() or "not a pwm" in str(e).lower():
             h = gpio_open()
             try:

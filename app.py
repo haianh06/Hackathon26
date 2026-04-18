@@ -84,19 +84,19 @@ if "editing_node" not in st.session_state:
 
 # ── Multi-stop state ──────────────────────────────────────────────────────────
 if "multi_waypoints" not in st.session_state:
-    st.session_state.multi_waypoints = []      # list of node IDs selected by user
+    st.session_state.multi_waypoints = []
 
 if "multi_start" not in st.session_state:
-    st.session_state.multi_start = None        # starting node for multi-stop tour
+    st.session_state.multi_start = None
 
 if "tour_visit_order" not in st.session_state:
-    st.session_state.tour_visit_order = []     # optimized visit order (node IDs)
+    st.session_state.tour_visit_order = []
 
 if "segment_breaks" not in st.session_state:
-    st.session_state.segment_breaks = []       # index positions in current_path for each leg
+    st.session_state.segment_breaks = []
 
 if "multi_click_step" not in st.session_state:
-    st.session_state.multi_click_step = 0      # 0=wait for start, 1=collecting waypoints
+    st.session_state.multi_click_step = 0
 
 # ── Turn config persistence ───────────────────────────────────────────────────
 # ... existing turn config init ...
@@ -200,11 +200,9 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                         # OpenCV VideoWriter expects BGR, frame is BGR natively now
                         st.session_state.video_writer.write(frame)
 
-                    # Convert to Base64 to bypass Streamlit's MediaFileStorageError
                     _, buffer = cv2.imencode('.jpg', frame)
                     img_base64 = base64.b64encode(buffer).decode()
                     
-                    # Use a full-width div to ensure the image stretches to fill the column
                     st.markdown(
                         f"""
                         <div style="width: 100%; margin-bottom: 20px;">

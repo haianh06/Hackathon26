@@ -31,51 +31,42 @@ class AutonomousCar:
         self.state = CarState.PLANNING
         self._rfid = None
         self.is_active = False
-        self.log_history = []          # Live console logs for the web UI
+        self.log_history = []
         self.last_right_x = -1
         self.base_speed = 120
         self.target_right = 300
-        self.scan_y_right = 0.6       # New ratio from HD
-        self.scan_search_up_rows = 35  # Scanning range
-        self.debug_frame = None        # Stores visualized frame for the UI
-        self.blind_run_end_time = None # Timer value for Waypoints without RFID
-        self.blind_run_target_node = None # The destination of the timer
-        self._last_blind_log = 0       # Throttling log
+        self.scan_y_right = 0.6
+        self.scan_search_up_rows = 35
+        self.debug_frame = None
+        self.blind_run_end_time = None
+        self.blind_run_target_node = None
+        self._last_blind_log = 0
 
-        # Lane Detection Algorithm Config
-        self.detection_mode = lane_mode  # "basic", "sliding_window"
-        
-        # Perspective Transform Points (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
-        # Defaults for 320x240 frame if not provided
-        if perspective_src is not None:
-            self.perspective_src = np.float32(perspective_src)
-        else:
-            self.perspective_src = np.float32([
-                [120, 160], [200, 160], 
-                [300, 230], [20, 230]
-            ])
+        self.detection_mode = lane_mode
+        self.perspective_src = np.float32(perspective_src) if perspective_src is not None else np.float32([
+            [120, 160], [200, 160], 
+            [300, 230], [20, 230]
+        ])
         
         self.perspective_dst = np.float32([
             [80, 0], [240, 0], 
             [240, 240], [80, 240]
         ])
 
-        # Traffic Sign Detection Integration
         try:
             from core.detector import SignDetector
             from core.classifier import SignClassifier
             self.sign_detector = SignDetector()
             self.sign_classifier = SignClassifier(templates_dir='templates')
             self.has_sign_detection = True
-            # self._log will be used when actived, we can just print here
-            print("[INIT] Traffic Sign Detection module loaded successfully.")
+            print("[INIT] Sign detection module loaded.")
         except Exception as e:
-            print(f"Failed to initialize sign detection: {e}")
+            print(f"[INIT] Sign detection error: {e}")
             self.has_sign_detection = False
             
         self.last_sign_detect_time = 0.0
-        self.sign_detect_interval = 0.5  # Run detection every 0.5 seconds
-        self.last_detected_signs = []    # Cache to display on UI between detections
+        self.sign_detect_interval = 0.5
+        self.last_detected_signs = []
 
     @property
     def rfid(self):
@@ -114,21 +105,17 @@ class AutonomousCar:
         if uid in self.rfid_map:
             detected = self.rfid_map[uid]
             if detected != self.current_node:
-                # Optimized prev_node logic: Use actual predecessor in path for accurate turn geometry
                 if self.predefined_path and detected in self.predefined_path:
                     try:
                         idx = self.predefined_path.index(detected)
-                        if idx > 0:
-                            self.prev_node = self.predefined_path[idx-1]
-                        else:
-                            self.prev_node = self.current_node
+                        self.prev_node = self.predefined_path[idx-1] if idx > 0 else self.current_node
                     except ValueError:
                         self.prev_node = self.current_node
                 else:
                     self.prev_node = self.current_node
                 
                 self.current_node = detected
-                self._log(f"[RFID] Phát hiện node: {self._get_node_label(detected)}")
+                self._log(f"[RFID] Node detected: {self._get_node_label(detected)}")
                 self.state = CarState.PLANNING
 
         if self.state == CarState.PLANNING:
@@ -159,8 +146,6 @@ class AutonomousCar:
                     self.next_node = path[1]
                     self._log(f"[NAV] {self._get_node_label(self.current_node)} → {self._get_node_label(self.next_node)}")
                     
-                    # New: Logic for Waypoint-only final segments (Blind Run)
-                    # Support both Virtual nodes (V_) and Manual Waypoints (W_)
                     remaining_path = path[1:]
                     if all(str(node).startswith("V_") or str(node).startswith("W_") for node in remaining_path):
                         try:
@@ -239,9 +224,8 @@ class AutonomousCar:
                     self.blind_run_end_time = None
                     self.blind_run_target_node = None
                 else:
-                    # Log countdown every 0.5s to avoid spamming
                     if not hasattr(self, '_last_blind_log') or time.time() - self._last_blind_log >= 0.5:
-                        self._log(f"[BLIND-RUN] Đang về đích... Còn lại {rem:.1f}s")
+                        self._log(f"[BLIND-RUN] Estimated arrival in {rem:.1f}s")
                         self._last_blind_log = time.time()
                     self.follow_lane()
             else:
@@ -253,12 +237,10 @@ class AutonomousCar:
             motor.move_straight()
             return
 
-        # Resize for CV processing (320x240 is efficient)
         frame = cv2.resize(raw_frame, (320, 240))
         
         if self.detection_mode == "sliding_window":
             right_x_raw, y_right, debug_ovl = self._sliding_window_lane(frame)
-            # Override frame with visual feedback if needed
             self._draw_edge_overlay(frame, cv2.Canny(cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (5,5), 0), 100, 200))
             if debug_ovl is not None:
                 frame = cv2.addWeighted(frame, 1.0, debug_ovl, 0.8, 0)
@@ -266,13 +248,11 @@ class AutonomousCar:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             edges = cv2.Canny(blurred, 100, 200)
-            # Draw edge visualization overlay
             self._draw_edge_overlay(frame, edges)
             right_x_raw, y_right = self._find_right_lane(edges)
 
-        y_left = y_right # For potential visualization constraints, or just use y_right
+        y_left = y_right
         
-        # Lưu toạ độ mới nhất khi phát hiện được
         if right_x_raw != -1:
             self.last_right_x = right_x_raw
 
@@ -288,7 +268,6 @@ class AutonomousCar:
         current_time = time.time()
         if self.has_sign_detection and (current_time - self.last_sign_detect_time) > self.sign_detect_interval:
             self.last_sign_detect_time = current_time
-            # detect_signs expects RGB and raw_frame is natively BGR from camera module
             rgb_frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
             detected_signs = self.sign_detector.detect_signs(rgb_frame)
             
@@ -296,24 +275,20 @@ class AutonomousCar:
             if detected_signs:
                 for idx, (roi, bbox) in enumerate(detected_signs):
                     sign_type, confidence = self.sign_classifier.classify(roi)
-                    if confidence >= 0.5: # Only consider reasonably confident detections
+                    if confidence >= 0.5:
                         self.last_detected_signs.append((sign_type, confidence, bbox))
                         log_msg = f"[VISION] Detected {sign_type.upper()} sign ({confidence*100:.1f}%)"
                         self._log(log_msg)
-                        print(log_msg)
 
-        # --- Visualization Logic (HD) ---
+        # --- Visualization ---
         display_frame = frame.copy()
         
-        # Overlay Traffic Signs (Scale bbox from raw_frame to display_frame)
         raw_h, raw_w = raw_frame.shape[:2]
         h_ratio = 240 / raw_h
         w_ratio = 320 / raw_w
         for sign_type, conf, (rx, ry, rw, rh) in self.last_detected_signs:
-            x = int(rx * w_ratio)
-            y = int(ry * h_ratio)
-            w = int(rw * w_ratio)
-            h = int(rh * h_ratio)
+            x, y = int(rx * w_ratio), int(ry * h_ratio)
+            w, h = int(rw * w_ratio), int(rh * h_ratio)
             cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 255), 2)
             cv2.putText(display_frame, f"{sign_type} {int(conf*100)}%", (x, max(15, y - 5)), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)

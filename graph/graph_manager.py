@@ -1,23 +1,15 @@
-"""
-graph_manager.py
-Manages the NetworkX undirected graph representing the parking-lot map.
-Supports loading/saving from JSON, CRUD for nodes/edges, virtual node creation,
-and closest-edge projection for click-on-blank-space pathfinding.
-"""
-
 import json
 import math
 import os
 import networkx as nx
-
 
 class GraphManager:
     DEFAULT_SAVE_PATH = "data/graph.json"
 
     def __init__(self):
         self.graph: nx.Graph = nx.Graph()
-        self._counter: int = 0          # used to generate unique virtual-node IDs
-        self._waypoint_counter: int = 0 # used for persistent Waypoint node IDs
+        self._counter: int = 0
+        self._waypoint_counter: int = 0
         self.speed_px_per_sec: float = 5.0
 
     # ─────────────────────────── Persistence ────────────────────────────────

@@ -1,82 +1,56 @@
-# 🚗 Hệ Thống Xe Tự Hành - LoPi (Hackathon 2026)
+# Hackathon 2026: Autonomous Navigation System (LoPi)
 
-Hệ thống xe tự hành thông minh chạy trên nền tảng Raspberry Pi, tích hợp Camera ML nhận diện biển báo giao thông, RFID định vị vị trí và thuật toán bám làn đường nâng cao (HD Lane Following). Đi kèm một Dashboard hoàn chỉnh viết bằng Streamlit giúp điều hướng, cấu hình và tinh chỉnh bằng giao diện trực quan 100%.
-
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
-![Raspberry Pi](https://img.shields.io/badge/Raspberry_Pi-4%2F5-A22846?logo=raspberrypi&logoColor=white)
-![OpenCV](https://img.shields.io/badge/OpenCV-4.x-5C3EE8?logo=opencv&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-Web_UI-FF4B4B?logo=streamlit&logoColor=white)
+A high-performance autonomous robot control system built on Raspberry Pi 5. Features computer vision-based lane following, RFID-guided navigation, and a comprehensive Streamlit dashboard.
 
 ---
 
-## 🔑 Tính năng nổi bật
+## 🏗 System Architecture
 
-| Chức năng | Mô tả |
-| --- | --- |
-| 🛞 **Bám Làn Siêu Nét HD** | Thuật toán nhận diện làn đường bằng Canny Edge, hiệu chỉnh Bird-eye view, xử lý tốc độ cao ổn định. |
-| 🛑 **Nhận Hiện Biển Báo** | Tích hợp thư viện xử lý phân loại biển báo trên đường. |
-| 📡 **Định vị & Lập Bản Đồ RFID** | Quét thẻ RFID MFRC522 để đồng bộ vị trí xe với "Bản đồ ảo" ngay lập tức. |
-| 🚀 **Web App Tích Hợp** | Toàn bộ hệ thống gói gọn trong duy nhất 1 Web UI chạy bằng Streamlit. Không cần chạy các file đa luồng rời rạc phức tạp! |
-| 🎮 **Lái Xe Bằng Gamepad (WASD)** | Lái xe thủ công từ điện thoại hoặc màn hình cảm ứng để phục vụ việc debug điểm ảnh. |
+The project is organized into modular layers for perception, navigation, and hardware control:
 
----
-
-## 🏗 Kiến Trúc Hệ Thống Chuẩn Hóa
-Toàn bộ mã nguồn đã được tái cấu trúc dồn về một vị trí duy nhất:
-
-```text
-Hackathon26/
-├── app.py                  # Dựng toàn bộ API Web điều khiển (Khởi chạy CHÍNH từ file này)
-├── autonomous_main.py      # Lõi Xe tự hành AutonomousCar xử lý NavEngine, HD Lane Following
-├── core/                   # Các logic toán học: navigation, sign classifier, sign detector.
-├── graph/                  # GraphManager và Dijkstra Pathfinding
-├── hardware/               # Driver API điều khiển Motor(lgpio), Camera(libcamera), RFID(SPI)
-├── ui/                     # Widget, Dashboard Graph dành cho nền tảng Streamlit app.
-├── data/                   # JSON cấu hình tự động (graph.json, turn_config.json) & Recordings.
-└── templates/              # Thư viện ảnh biển báo (Feature matching AI detection)
-```
+- `app.py`: Integrated Web UI and system entry point.
+- `autonomous_main.py`: Core mission logic and high-speed lane perception.
+- `core/`: Vision processing (Sign detection/classification) and navigation engines.
+- `graph/`: Dijkstra-based pathfinding and graph management.
+- `hardware/`: Drivers for Motor control (LGPIO), Camera (libcamera), and RFID (SPI).
+- `data/`: Real-time configuration (JSON maps, path data) and mission recordings.
 
 ---
 
-## 🚀 Hướng Dẫn Sử Dụng
+## 🚀 Getting Started
 
-### 1. Cài đặt Môi trường (Cần Thiết)
-Flash Raspberry Pi OS có Desktop hoặc cài hệ thông chuẩn trên Pi 5.
+### 1. System Requirements
+Requires Raspberry Pi OS (Pi 4 or Pi 5). Enable SPI via `raspi-config`.
 
+### 2. Installation
 ```bash
-sudo raspi-config
-# Bật SPI trong Interfacing Options.
+# System dependencies
+sudo apt update && sudo apt install -y python3-lgpio python3-spidev
 
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3-lgpio python3-spidev
-```
-
-Clone và cài thư viện:
-```bash
+# Environment setup
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
-pip install numpy pandas streamlit picamera2 opencv-python networkx plotly
+pip install numpy streamlit picamera2 opencv-python networkx plotly
 ```
 
-### 2. Khởi Chạy Hệ Thống Duy Nhất
-Mọi tính năng từ Camera cho tới Điều Hướng nay đã tích hợp trong Website. Bật 1 lệnh duy nhất sau ở máy Raspberry:
-
+### 3. Launching the System
+All modules are managed via the integrated Dashboard.
 ```bash
-source venv/bin/activate
 streamlit run app.py
 ```
 
-### 3. Thao tác trên Web
+---
 
-1. **Truy cập IP**: `http://<IP-Của-Pi>:8501`
-2. **Tìm đường thông minh**: Qua Tab `Bản đồ cốt lõi` nhấn chọn điểm xuất phát và chọn ngã rẽ. 
-3. **Cấu hình xe gốc**: Qua Tab `Calibration` có tính năng tính "Pixel per second" để bạn cho xe chạy thẳng đo thời gian hoặc tự động cài test góc cua (`90°` vuông rẽ trái hoặc `180°` quay lại) cho phù hợp với pin vật lý.
-4. **Lái thủ công**: Vào Tab `Điều khiển WASD`, nhấp vào vùng kích hoạt lái, thử di chuyển xe nhẹ nhàng.
+## 🛠 Features
+
+- **Advanced Lane Perception**: Dual-mode lane following (Basic Scan or Sliding Window with Polynomial Fitting).
+- **RFID Virtual Positioning**: Real-time position syncing between the physical robot and the virtual map.
+- **Smart Pathfinding**: Support for sequential waypoints and multi-stop optimized tours.
+- **Unified Control**: Real-time camera streaming, manual WASD overrides, and dynamic parameter tuning (Timings/Perspective) from a single Web UI.
 
 ---
 
-## 🔧 Xử Lý Sự Cố Khẩn 
+## 🔧 Troubleshooting
 
-1. **`ModuleNotFoundError: ...`**: Ensure dependencies in the Python Virtual Environment are correctly bound.
-2. **Xe quá giật khi bám làn**: Tinh chỉnh lại ngưỡng PID trong hàm `follow_lane()` file `autonomous_main.py`, đặc biệt là `base_speed`.
-3. **`Camera in Configured state`**: Có thể thư viện libcamera OS chưa giải phóng kịp session cũ. Hãy giết process `pkill -f streamlit` và bật lại.`
+- **Hardware Cleanup**: If the camera state persists after a crash, clear processes using `pkill -f streamlit`.
+- **Latency**: Ensure the Pi 5 is powered by a stable 5V/5A supply for optimal libcamera performance.
