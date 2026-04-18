@@ -132,7 +132,7 @@ def create_parking_lot_map(
         for i, n in enumerate(visit_order):
             visit_rank[n] = i + 1
 
-    node_x, node_y, custom_data, node_colors, node_text, sizes, symbols = [], [], [], [], [], [], []
+    node_x, node_y, custom_data, node_colors, node_text, sizes, symbols, map_labels = [], [], [], [], [], [], [], []
     for node, data in G.nodes(data=True):
         node_x.append(data['x'])
         node_y.append(data['y'])
@@ -172,7 +172,7 @@ def create_parking_lot_map(
         sizes.append(s)
         symbols.append(symbol)
 
-        # Hover text
+        # Labels & Hover text
         label = data.get('label', '') or node
         rank_txt = f"<br>🔢 Ghé thăm #: {visit_rank[node]}" if node in visit_rank else ""
         role_txt = ""
@@ -181,15 +181,20 @@ def create_parking_lot_map(
         elif node == end_node and not waypoints:
             role_txt = "<br>🔴 Điểm đến"
         node_text.append(f"<b>{label}</b><br>ID: {node}{rank_txt}{role_txt}")
+        # Only show labels on map if they are actual names (not just IDs) or if they are important nodes
+        is_important = node in [start_node, end_node, sim_node] or node in waypoints or node in current_path
+        map_labels.append(label if (data.get('label') or is_important) else "")
 
     fig.add_trace(go.Scatter(
-        x=node_x, y=node_y, mode='markers',
+        x=node_x, y=node_y, mode='markers+text',
         hoverinfo='text',
         hovertext=node_text,
-        marker=dict(showscale=False, color=node_colors, size=sizes, symbol=symbols, line_width=2),
+        text=map_labels,
+        textposition="top center",
+        marker=dict(showscale=False, color=node_colors, size=sizes, symbol=symbols, line_width=1.5, line=dict(color='white')),
         name="RFID Checkpoints",
         customdata=custom_data,
-        textfont=dict(color="black")
+        textfont=dict(color="black", size=10, family="Arial Black")
     ))
 
     # ── Waypoint order annotations ────────────────────────────────────────

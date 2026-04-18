@@ -22,9 +22,22 @@ def init_motors():
     return h
 
 def _set_pwm(pin, us):
-    h = init_motors()
-    duty = (us / 20000) * 100
-    lgpio.tx_pwm(h, pin, PWM_FREQ, duty)
+    try:
+        h = init_motors()
+        duty = (us / 20000) * 100
+        lgpio.tx_pwm(h, pin, PWM_FREQ, duty)
+    except lgpio.error as e:
+        # If pin not set as output, try to claim it again and retry once
+        if "not set as an output" in str(e).lower() or "not a pwm" in str(e).lower():
+            h = gpio_open()
+            try:
+                lgpio.gpio_claim_output(h, pin)
+                duty = (us / 20000) * 100
+                lgpio.tx_pwm(h, pin, PWM_FREQ, duty)
+            except:
+                pass
+        else:
+            raise e
 
 def move_straight():
     _set_pwm(LEFT_PIN, STOP_VAL - DRIVE_SPEED)

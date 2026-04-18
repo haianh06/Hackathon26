@@ -73,7 +73,8 @@ class SignClassifier:
             
             # Resize to standard size
             template_resized = cv2.resize(template, self.template_size)
-            self.templates[sign_type] = template_resized
+            _, template_binary = cv2.threshold(template_resized, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+            self.templates[sign_type] = template_binary
     
     def template_matching(self, roi: np.ndarray) -> Tuple[str, float]:
         """
@@ -93,6 +94,8 @@ class SignClassifier:
             roi_gray = cv2.cvtColor(roi_resized, cv2.COLOR_RGB2GRAY)
         else:
             roi_gray = roi_resized
+            
+        _, roi_binary = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
         
         best_match = None
         best_confidence = -1.0
@@ -101,11 +104,14 @@ class SignClassifier:
             if template is None:
                 continue
             
-            # Perform template matching on grayscale image
-            result = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+            # Perform template matching on binary image
+            result = cv2.matchTemplate(roi_binary, template, cv2.TM_CCOEFF_NORMED)
             
             # Get the maximum correlation value
             _, max_val, _, _ = cv2.minMaxLoc(result)
+            
+            # Use absolute value to make it color-agnostic (handles white-on-dark AND dark-on-white)
+            max_val = abs(max_val)
             
             # Update best match if this confidence is higher
             if max_val > best_confidence:
@@ -242,6 +248,8 @@ class SignClassifier:
             roi_gray = cv2.cvtColor(roi_resized, cv2.COLOR_RGB2GRAY)
         else:
             roi_gray = roi_resized
+            
+        _, roi_binary = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
         
         all_scores = {}
         best_match = None
@@ -252,11 +260,14 @@ class SignClassifier:
                 all_scores[sign_type] = 0.0
                 continue
             
-            # Perform template matching on grayscale
-            result = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+            # Perform template matching on binary image
+            result = cv2.matchTemplate(roi_binary, template, cv2.TM_CCOEFF_NORMED)
             
             # Get the maximum correlation value
             _, max_val, _, _ = cv2.minMaxLoc(result)
+            
+            # Use absolute value to make it color-agnostic (handles white-on-dark AND dark-on-white)
+            max_val = abs(max_val)
             
             all_scores[sign_type] = max_val
             

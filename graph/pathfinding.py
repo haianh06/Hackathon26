@@ -17,40 +17,55 @@ def _euclidean_heuristic(G: nx.Graph, u, v):
     return math.hypot(x2 - x1, y2 - y1)
 
 
-def compute_shortest_path(graph_manager, source: str, target: str, algorithm: str = "Dijkstra"):
+def compute_shortest_path(graph_manager, source: str, target: str, algorithm: str = "Dijkstra", initial_heading: float = None):
     """
-    Compute the shortest path between source and target nodes.
-
-    Parameters
-    ----------
-    graph_manager : GraphManager
-    source        : str  – starting node ID
-    target        : str  – destination node ID
-    algorithm     : str  – "Dijkstra" (default) or "A*"
-
-    Returns
-    -------
-    (path: list[str], cost: float)
-    Returns ([], 0.0) if no path exists.
+    Compute the shortest path between source and target nodes, optionally preferring 
+    the direction of 'initial_heading' at the start.
     """
     G = graph_manager.graph
-
     if source not in G or target not in G:
         return [], 0.0
+
+    # If heading is set, we use a temporary directed graph to apply turn penalties
+    # only on the edges leaving the source node.
+    if initial_heading is not None:
+        DG = nx.DiGraph(G)
+        x1, y1 = G.nodes[source]["x"], G.nodes[source]["y"]
+        
+        for neighbor in G.neighbors(source):
+            x2, y2 = G.nodes[neighbor]["x"], G.nodes[neighbor]["y"]
+            edge_angle = math.degrees(math.atan2(y2 - y1, x2 - x1)) % 360
+            
+            diff = (edge_angle - initial_heading) % 360
+            if diff > 180: diff -= 360
+            
+            penalty = 0.0
+            if abs(diff) > 135: 
+                penalty = 100.0  # Big penalty for turn-around
+            elif abs(diff) > 45:
+                penalty = 10.0   # Small penalty for side turns
+            
+            # Apply penalty to the outgoing edge from source
+            if DG.has_edge(source, neighbor):
+                DG[source][neighbor]["weight"] = G[source][neighbor].get("weight", 1.0) + penalty
+        
+        working_graph = DG
+    else:
+        working_graph = G
 
     try:
         if algorithm == "A*":
             path = nx.astar_path(
-                G, source, target,
+                working_graph, source, target,
                 heuristic=lambda u, v: _euclidean_heuristic(G, u, v),
                 weight="weight"
             )
         else:
-            path = nx.dijkstra_path(G, source, target, weight="weight")
+            path = nx.dijkstra_path(working_graph, source, target, weight="weight")
 
+        # Always calculate the TRUE cost using the original graph (w/o penalties)
         cost = nx.path_weight(G, path, weight="weight")
         return path, cost
-
     except (nx.NetworkXNoPath, nx.NodeNotFound):
         return [], 0.0
 
@@ -249,24 +264,10 @@ def solve_tsp_tour(dist_matrix: dict, nodes: list, start: str):
         return _solve_tsp_greedy_2opt(nodes, start, dist_matrix)
 
 
-def compute_multi_stop_path(graph_manager, start: str, waypoints: list, algorithm: str = "Dijkstra"):
+def compute_multi_stop_path(graph_manager, start: str, waypoints: list, algorithm: str = "Dijkstra", initial_heading: float = None):
     """
     Compute an optimal multi-stop round trip: start → [waypoints in best order] → start.
-
-    Parameters
-    ----------
-    graph_manager : GraphManager
-    start         : starting node ID
-    waypoints     : list of waypoint node IDs to visit (order doesn't matter — will be optimized)
-    algorithm     : "Dijkstra" or "A*"
-
-    Returns
-    -------
-    (full_path: list[str], total_cost: float, visit_order: list[str], is_exact: bool)
-    full_path   : complete node sequence including all intermediate nodes
-    total_cost  : sum of all edge weights
-    visit_order : optimized order of waypoints (NOT including start)
-    is_exact    : True if Held-Karp was used, False if greedy fallback
+    Respects initial_heading for the first segment.
     """
     all_nodes = list(dict.fromkeys([start] + waypoints))  # deduplicate, preserve order
 
@@ -280,7 +281,21 @@ def compute_multi_stop_path(graph_manager, start: str, waypoints: list, algorith
         return [start], 0.0, [], True
 
     # Step 1: compute pairwise distances
-    dist_matrix = compute_distance_matrix(graph_manager, all_nodes, algorithm)
+    # For the matrix, only the distances starting from 'start' should respect initial_heading
+    dist_matrix = {}
+    for u in all_nodes:
+        for v in all_nodes:
+            if u == v:
+                dist_matrix[(u, v)] = {"cost": 0.0, "path": [u]}
+                continue
+            
+            # Apply heading only if we are starting from 'start'
+            h = initial_heading if u == start else None
+            path, cost = compute_shortest_path(graph_manager, u, v, algorithm, initial_heading=h)
+            
+            if not path:
+                cost = float("inf")
+            dist_matrix[(u, v)] = {"cost": cost, "path": path}
 
     # Check reachability
     for u in all_nodes:
@@ -314,20 +329,10 @@ def compute_multi_stop_path(graph_manager, start: str, waypoints: list, algorith
     return full_path, total_cost, visit_order, is_exact
 
 
-def compute_sequential_path(graph_manager, start: str, waypoints: list, algorithm: str = "Dijkstra"):
+def compute_sequential_path(graph_manager, start: str, waypoints: list, algorithm: str = "Dijkstra", initial_heading: float = None):
     """
     Compute a multi-stop path that visits waypoints in exactly the order provided.
-    
-    Parameters
-    ----------
-    graph_manager : GraphManager
-    start         : starting node ID
-    waypoints     : list of node IDs to visit in strict order
-    algorithm     : "Dijkstra" or "A*"
-    
-    Returns
-    -------
-    (full_path, total_cost, visit_order)
+    Respects initial_heading for the first segment.
     """
     all_sequence = [start] + waypoints
     full_path = []
@@ -335,7 +340,11 @@ def compute_sequential_path(graph_manager, start: str, waypoints: list, algorith
     
     for i in range(len(all_sequence) - 1):
         u, v = all_sequence[i], all_sequence[i+1]
-        path, cost = compute_shortest_path(graph_manager, u, v, algorithm)
+        
+        # Apply heading only to the first leg
+        h = initial_heading if i == 0 else None
+        path, cost = compute_shortest_path(graph_manager, u, v, algorithm, initial_heading=h)
+        
         if not path:
             return [], 0.0, waypoints
         

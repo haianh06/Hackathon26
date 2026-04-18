@@ -29,12 +29,24 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
         # ── Edge Management ──────────────────────────────────────────────
         st.subheader("🔗 Kết Nối Nodes (Edges)")
 
-        all_node_ids = [n for n in gm.graph.nodes() if not str(n).startswith("V_")]
+        # Helper for display labels: "Label (ID)" or just "ID" if no label
+        def _node_label(nid):
+            lbl = gm.graph.nodes[nid].get("label", "")
+            return f"{lbl}  [{nid}]" if lbl else f"[{nid}]"
 
-        if len(all_node_ids) >= 2:
+        all_real_nodes = [n for n in gm.graph.nodes() if not str(n).startswith("V_")]
+
+        if len(all_real_nodes) >= 2:
             col_u, col_v = st.columns(2)
-            edge_u = col_u.selectbox("Node A", all_node_ids, key="edge_u")
-            edge_v = col_v.selectbox("Node B", all_node_ids, key="edge_v", index=min(1, len(all_node_ids) - 1))
+            
+            node_options = {_node_label(n): n for n in all_real_nodes}
+            display_list = list(node_options.keys())
+            
+            u_display = col_u.selectbox("Node A", display_list, key="edge_u")
+            v_display = col_v.selectbox("Node B", display_list, key="edge_v", index=min(1, len(display_list) - 1))
+            
+            edge_u = node_options[u_display]
+            edge_v = node_options[v_display]
             edge_w = st.number_input("Trọng số (Weight)", value=1.0, min_value=0.1, step=0.5, key="edge_w")
 
             e_col1, e_col2 = st.columns(2)
@@ -62,19 +74,14 @@ def render_sidebar_controls(gm, sim, current_path: list, path_cost: float) -> st
 
         # ── Node Deletion ─────────────────────────────────────────────────
         st.subheader("🗑️ Xóa Node")
-        if all_node_ids:
-            # Build display labels: "Label (ID)" or just "ID" if no label
-            def _node_label(nid):
-                lbl = gm.graph.nodes[nid].get("label", "")
-                return f"{lbl}  [{nid}]" if lbl else f"[{nid}]"
-
-            node_options = {_node_label(n): n for n in all_node_ids}
+        if all_real_nodes:
+            node_options_del = {_node_label(n): n for n in all_real_nodes}
             del_display = st.selectbox(
                 "Chọn node cần xóa:",
-                list(node_options.keys()),
+                list(node_options_del.keys()),
                 key="del_node_select"
             )
-            del_node_id = node_options[del_display]
+            del_node_id = node_options_del[del_display]
 
             # Show node info
             ndata = gm.graph.nodes[del_node_id]

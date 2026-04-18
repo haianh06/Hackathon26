@@ -23,7 +23,7 @@ class SignDetector:
                  hsv_upper: Tuple[int, int, int] = (130, 255, 255),
                  min_area: int = 500,
                  max_area: int = 50000,
-                 circularity_threshold: float = 0.7):
+                 circularity_threshold: float = 0.4):
         """
         Initialize the SignDetector.
         

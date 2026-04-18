@@ -1,0 +1,16 @@
+{
+    "To D": {
+        "multi_start": "V_105",
+        "multi_waypoints": [
+            "D25CD6055D"
+        ],
+        "initial_heading": 180
+    },
+    "To V": {
+        "multi_start": "D25CD6055D",
+        "multi_waypoints": [
+            "V_105"
+        ],
+        "initial_heading": 270
+    }
+}

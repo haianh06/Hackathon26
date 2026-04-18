@@ -74,6 +74,7 @@ class CameraManager:
                     if self.picam2:
                         try:
                             self.picam2.stop()
+                            self.picam2.close()
                         except: pass
                         self.picam2 = None
                     # Wait longer on failure to allow hardware to release
@@ -130,7 +131,9 @@ class CameraManager:
                 print(f"⚠️ CameraManager capture error: {e}")
                 # If Picamera2 crashes, we might need to reset everything
                 if self.picam2:
-                    try: self.picam2.stop()
+                    try: 
+                        self.picam2.stop()
+                        self.picam2.close()
                     except: pass
                     self.picam2 = None
                 time.sleep(1.0)
@@ -141,7 +144,9 @@ class CameraManager:
 
     def _cleanup(self):
         if self.picam2:
-            try: self.picam2.stop()
+            try: 
+                self.picam2.stop()
+                self.picam2.close()
             except: pass
             self.picam2 = None
         if self.cap:

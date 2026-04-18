@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import base64
+import json
 import sys
 import time
 import math
@@ -15,7 +17,6 @@ def get_camera_manager():
 
 try:
     from hardware.rfid import RFIDReader
-    from config.graph_data import TURN_CONFIG
     from autonomous_main import AutonomousCar
     import hardware.motor as motor
     import importlib
@@ -98,16 +99,46 @@ if "multi_click_step" not in st.session_state:
     st.session_state.multi_click_step = 0      # 0=wait for start, 1=collecting waypoints
 
 # ── Turn config persistence ───────────────────────────────────────────────────
+# ... existing turn config init ...
+
+# ── Route Persistence Helpers ─────────────────────────────────────────────────
+ROUTES_FILE = "data/routes.json"
+
+def load_saved_routes():
+    if not os.path.exists(ROUTES_FILE):
+        return {}
+    try:
+        with open(ROUTES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_route(name, data):
+    routes = load_saved_routes()
+    routes[name] = data
+    os.makedirs(os.path.dirname(ROUTES_FILE), exist_ok=True)
+    with open(ROUTES_FILE, "w", encoding="utf-8") as f:
+        json.dump(routes, f, indent=4, ensure_ascii=False)
+
+def delete_route(name):
+    routes = load_saved_routes()
+    if name in routes:
+        del routes[name]
+        with open(ROUTES_FILE, "w", encoding="utf-8") as f:
+            json.dump(routes, f, indent=4, ensure_ascii=False)
+        return True
+    return False
 TURN_CONFIG_PATH = "data/turn_config.json"
 
 def _load_turn_config() -> dict:
     """Load turn timing from JSON file, fallback to defaults."""
-    defaults = {"90_DEG": 1.7}
+    defaults = {"90_DEG": 1.7, "180_DEG": 1.8, "STRAIGHT": 1.0}
     try:
-        import json
-        with open(TURN_CONFIG_PATH) as f:
-            data = json.load(f)
-            return {**defaults, **data}
+        if os.path.exists(TURN_CONFIG_PATH):
+            with open(TURN_CONFIG_PATH) as f:
+                data = json.load(f)
+                return {**defaults, **data}
+        return defaults
     except Exception:
         return defaults
 
@@ -119,6 +150,16 @@ def _save_turn_config(cfg: dict):
 
 if "turn_config" not in st.session_state:
     st.session_state.turn_config = _load_turn_config()
+
+if "lane_mode" not in st.session_state:
+    st.session_state.lane_mode = "basic"
+
+if "perspective_src" not in st.session_state:
+    # Defaults: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+    st.session_state.perspective_src = [
+        [120, 160], [200, 160], 
+        [300, 230], [20, 230]
+    ]
 
 # ── Media & Recording Initialization ──────────────────────────────────────────
 REC_DIR = "data/recordings"
@@ -141,7 +182,7 @@ def stop_recording():
     st.session_state.recording_file = ""
 
 # ── Camera Feed & Status Fragments ──────────────────────────────────────────
-@st.fragment(run_every=0.8)
+@st.fragment(run_every=1.0)
 def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
     if HAS_HW:
         with st.container(border=True):
@@ -159,8 +200,21 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                         # OpenCV VideoWriter expects BGR, frame is BGR natively now
                         st.session_state.video_writer.write(frame)
 
-                    # frame is natively BGR from manager, need RGB for web display
-                    st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), caption="Live Camera Feed", width='stretch')
+                    # Convert to Base64 to bypass Streamlit's MediaFileStorageError
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    img_base64 = base64.b64encode(buffer).decode()
+                    
+                    # Use a full-width div to ensure the image stretches to fill the column
+                    st.markdown(
+                        f"""
+                        <div style="width: 100%; margin-bottom: 20px;">
+                            <img src="data:image/jpeg;base64,{img_base64}" 
+                                 style="width: 100%; display: block; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                            <div style="text-align: center; color: #888; font-size: 0.8em; margin-top: 5px;">Live Camera Feed</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                 else:
                     st.info("Chờ Camera khởi động...")
             with cam_col2:
@@ -170,6 +224,49 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                 st.metric(label_prefix, "Autonomous" if is_auton else "Standby")
                 
                 if show_media_controls:
+                    # ── Cấu hình thời gian (Timings) ──
+                    with st.expander("⚙️ Cấu hình thời gian (Timings)", expanded=False):
+                        cfg = st.session_state.turn_config
+                        c1, c2, c3 = st.columns(3)
+                        t_straight = c1.number_input("Đi thẳng (s):", 0.0, 5.0, float(cfg.get("STRAIGHT", 1.0)), 0.1)
+                        t_90 = c2.number_input("Rẽ 90° (s):", 0.0, 5.0, float(cfg.get("90_DEG", 1.7)), 0.1)
+                        t_180 = c3.number_input("Quay đầu (s):", 0.0, 5.0, float(cfg.get("180_DEG", 1.8)), 0.1)
+                        
+                        if st.button("💾 Lưu Cấu Hình Thời Gian", width='stretch'):
+                            new_cfg = {"STRAIGHT": t_straight, "90_DEG": t_90, "180_DEG": t_180}
+                            st.session_state.turn_config = new_cfg
+                            _save_turn_config(new_cfg)
+                            st.success("✅ Đã lưu cấu hình mới!")
+
+                    # ── Cấu hình thuật toán bám làn & BEV ──
+                    with st.expander("📐 Thuật toán bám làn & Hiệu chuẩn (BEV)", expanded=False):
+                        l_mode = st.selectbox("Thuật toán bám làn:", ["basic", "sliding_window"], index=0 if st.session_state.lane_mode == "basic" else 1, key=f"mode_sel_{key_suffix}")
+                        st.session_state.lane_mode = l_mode
+                        
+                        if l_mode == "sliding_window":
+                            st.write("**Hiệu chuẩn Perspective (Trapezoid):**")
+                            p = st.session_state.perspective_src
+                            # Point 1 (Top-Left)
+                            c1, c2 = st.columns(2)
+                            p[0][0] = c1.slider("TL-X", 0, 160, int(p[0][0]), 1, key=f"tlx_{key_suffix}")
+                            p[0][1] = c2.slider("TL-Y", 0, 240, int(p[0][1]), 1, key=f"tly_{key_suffix}")
+                            # Point 2 (Top-Right)
+                            c1, c2 = st.columns(2)
+                            p[1][0] = c1.slider("TR-X", 160, 320, int(p[1][0]), 1, key=f"trx_{key_suffix}")
+                            p[1][1] = c2.slider("TR-Y", 0, 240, int(p[1][1]), 1, key=f"try_{key_suffix}")
+                            # Point 3 (Bottom-Right)
+                            c1, c2 = st.columns(2)
+                            p[2][0] = c1.slider("BR-X", 160, 320, int(p[2][0]), 1, key=f"brx_{key_suffix}")
+                            p[2][1] = c2.slider("BR-Y", 0, 240, int(p[2][1]), 1, key=f"bry_{key_suffix}")
+                            # Point 4 (Bottom-Left)
+                            c1, c2 = st.columns(2)
+                            p[3][0] = c1.slider("BL-X", 0, 160, int(p[3][0]), 1, key=f"blx_{key_suffix}")
+                            p[3][1] = c2.slider("BL-Y", 0, 240, int(p[3][1]), 1, key=f"bly_{key_suffix}")
+                            st.session_state.perspective_src = p
+                            
+                        if st.button("💾 Lưu Cấu Hình Bám Làn", width='stretch', key=f"save_lane_{key_suffix}"):
+                            st.success("✅ Đã ghi nhớ cấu hình thuật toán!")
+
                     st.divider()
                     # Snapshot Button
                     if st.button("📸 Chụp Ảnh", width='stretch', key=f"snap_btn_{key_suffix}"):
@@ -197,6 +294,15 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                             st.rerun()
 
                 if st.button("🔄 Refresh Stream", key=f"refresh_btn_{key_suffix}"):
+                    st.toast("Đang tải lại Camera...")
+                    try:
+                        cm = get_camera_manager()
+                        cm.stop()
+                        from hardware.camera import CameraManager
+                        CameraManager._instance = None
+                        get_camera_manager.clear()
+                    except Exception as e:
+                        print(f"Lỗi refresh stream: {e}")
                     st.rerun()
 
 @st.fragment(run_every=1.5)
@@ -393,9 +499,25 @@ col3.metric(
 )
 
 
-tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Bản Đồ Cốt Lõi", "⚙️ Config Dừng Xe (Calibration)", "🎮 Điều Khiển WASD", "🛑 Traffic Sign Debug"])
+tab_options = {
+    "🗺️ Bản Đồ Cốt Lõi": "tab1",
+    "⚙️ Config Dừng Xe (Calibration)": "tab2",
+    "🎮 Điều Khiển WASD": "tab3",
+    "🛑 Traffic Sign Debug": "tab4"
+}
 
-with tab2:
+# Thay vì dùng st.tabs (chạy ngầm tất cả tab), dùng st.radio để chỉ chạy tab hiện tại
+selected_tab_label = st.radio(
+    "Chế độ hiển thị (Tabs):",
+    list(tab_options.keys()),
+    horizontal=True,
+    label_visibility="collapsed"
+)
+active_tab = tab_options[selected_tab_label]
+
+st.markdown("---")
+
+if active_tab == "tab2":
     st.header("⚙️ Calibration — Tốc độ & Thời gian Rẽ")
 
     # ── Speed calibration ────────────────────────────────────────────────
@@ -494,7 +616,7 @@ with tab2:
 
     st.caption(f"📌 Cấu hình hiện tại: 90° = {turn_cfg.get('90_DEG')}s | 180° = {turn_cfg.get('180_DEG')}s")
 
-with tab1:
+if active_tab == "tab1":
     # ──────────────────────────────────────────────
     # SECTION 1: RFID Node Registration Wizard
     # ──────────────────────────────────────────────
@@ -575,7 +697,7 @@ with tab1:
         with status_col:
             if pending:
                 st.info(
-                    f"📌 **Đang chờ ghim:** `{pending['id']}` — _{pending['label']}_  "
+                    f"📌 **Đang chờ ghim:** **{pending['label']}** `[{pending['id']}]`  "
                     f"\n👇 Nhấp vào bất kỳ điểm trống nào trên bản đồ bên dưới."
                 )
             elif not id_ok or not label_ok:
@@ -592,7 +714,9 @@ with tab1:
         if upd_col2.button("Cập nhật", width='stretch'):
             resolved_node = gm.get_node_by_uid(upd_id)
             if resolved_node and sim.force_scan(resolved_node):
-                st.success(f"✅ Cập nhật vị trí xe thành công! (Node: {resolved_node})")
+                lbl = gm.graph.nodes[resolved_node].get('label', '')
+                display = f"**{lbl}** `[{resolved_node}]`" if lbl else f"`[{resolved_node}]`"
+                st.success(f"✅ Cập nhật vị trí xe thành công! (Node: {display})")
                 time.sleep(0.5)
                 st.rerun()
             else:
@@ -622,6 +746,50 @@ with tab1:
             horizontal=True,
             key="map_click_mode"
         )
+    
+    # ── ROUTE SAVING/LOADING UI ───────────────────
+    with st.expander("📂 Quản Lý Lộ Trình Đã Lưu", expanded=False):
+        saved_routes = load_saved_routes()
+        
+        if saved_routes:
+            s_col1, s_col2 = st.columns([3, 1])
+            selected_route_name = s_col1.selectbox("Chọn lộ trình:", list(saved_routes.keys()), label_visibility="collapsed")
+            if s_col2.button("📂 Tải", width='stretch', type="primary"):
+                r_data = saved_routes[selected_route_name]
+                st.session_state.multi_start = r_data.get("multi_start")
+                st.session_state.multi_waypoints = r_data.get("multi_waypoints", [])
+                st.session_state.initial_heading = r_data.get("initial_heading", 0)
+                st.session_state.multi_click_step = 2 # Jump to Step 3
+                st.session_state.s_node = st.session_state.multi_start
+                # Reset previous calculation results
+                st.session_state.current_path = []
+                st.session_state.tour_visit_order = []
+                st.session_state.segment_breaks = []
+                st.session_state.path_cost = 0.0
+                st.success(f"✅ Đã tải lộ trình: **{selected_route_name}**")
+                st.rerun()
+            
+            if st.button(f"🗑️ Xóa lộ trình '{selected_route_name}'", type="secondary", width='stretch'):
+                if delete_route(selected_route_name):
+                    st.toast(f"Đã xóa {selected_route_name}")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("**💾 Lưu lộ trình hiện tại:**")
+        r_name = st.text_input("Tên lộ trình:", placeholder="Ví dụ: Cổng -> Kho A")
+        save_disabled = not (st.session_state.multi_start and st.session_state.multi_waypoints)
+        if st.button("💾 Lưu Lại", disabled=save_disabled, width='stretch'):
+            if not r_name.strip():
+                st.error("Vui lòng nhập tên lộ trình!")
+            else:
+                r_data = {
+                    "multi_start": st.session_state.multi_start,
+                    "multi_waypoints": st.session_state.multi_waypoints,
+                    "initial_heading": st.session_state.initial_heading
+                }
+                save_route(r_name.strip(), r_data)
+                st.success(f"✅ Đã lưu lộ trình: **{r_name}**")
+                st.rerun()
 
     # ──────────────────────────────────────────────
     # ROUTE PLANNING PANEL (3 STEPS)
@@ -640,14 +808,28 @@ with tab1:
                 if step == 0:
                     st.info("📍 **Bước 1:** Nhấp vào một node trên bản đồ để chọn **điểm xuất phát**.")
                 elif step == 1:
-                    start_label = gm.graph.nodes[multi_start].get('label', '') or multi_start
-                    st.success(f"🏁 **Xuất phát:** `{multi_start}` ({start_label})")
-                    st.info("🏎️ **Bước 2:** Nhấp vào hướng bất kỳ xung quanh điểm xuất phát để **xoay xe**.")
+                    if multi_start and multi_start in gm.graph:
+                        lbl = gm.graph.nodes[multi_start].get('label', '')
+                        start_disp = f"**{lbl}** `[{multi_start}]`" if lbl else f"`[{multi_start}]`"
+                        st.success(f"🏁 **Xuất phát:** {start_disp}")
+                        st.info("🏎️ **Bước 2:** Nhấp vào hướng bất kỳ xung quanh điểm xuất phát để **xoay xe**.")
+                    else:
+                        st.warning("⚠️ Điểm xuất phát không hợp lệ hoặc đã bị xóa. Vui lòng chọn lại (Bước 1).")
+                        st.session_state.multi_click_step = 0
+                        st.session_state.multi_start = None
+                        st.rerun()
                 else:
-                    start_label = gm.graph.nodes[multi_start].get('label', '') or multi_start
-                    st.success(f"🏁 **Xuất phát:** `{multi_start}` ({start_label})")
-                    st.success(f"🏎️ **Hướng:** `{st.session_state.initial_heading}°`")
-                    st.info("🎯 **Bước 3:** Nhấp chọn các **điểm đến** tiếp theo theo thứ tự.")
+                    if multi_start and multi_start in gm.graph:
+                        lbl = gm.graph.nodes[multi_start].get('label', '')
+                        start_disp = f"**{lbl}** `[{multi_start}]`" if lbl else f"`[{multi_start}]`"
+                        st.success(f"🏁 **Xuất phát:** {start_disp}")
+                        st.success(f"🏎️ **Hướng:** `{st.session_state.initial_heading}°`")
+                        st.info("🎯 **Bước 3:** Nhấp chọn các **điểm đến** tiếp theo theo thứ tự.")
+                    else:
+                        st.warning("⚠️ Điểm xuất phát không hợp lệ hoặc đã bị xóa. Vui lòng chọn lại.")
+                        st.session_state.multi_click_step = 0
+                        st.session_state.multi_start = None
+                        st.rerun()
 
                     if not multi_wps:
                         st.info("👇 **Bước 3:** Nhấp chọn các node trên bản đồ để thêm vào lộ trình. Rồi nhấn 'Tính Lộ Trình'.")
@@ -689,7 +871,8 @@ with tab1:
                             gm,
                             st.session_state.multi_start,
                             st.session_state.multi_waypoints,
-                            algo
+                            algo,
+                            initial_heading=st.session_state.get("initial_heading")
                         )
                     if not full_path:
                         st.error("❌ Không thể tính lộ trình! Kiểm tra xem các node có kết nối không.")
@@ -824,6 +1007,11 @@ with tab1:
                         
                         st.session_state.initial_heading = heading
                         st.session_state.multi_click_step = 2
+                        
+                        # Clear any existing path as start/heading has changed
+                        st.session_state.current_path = []
+                        st.session_state.tour_visit_order = []
+                        st.session_state.segment_breaks = []
                         st.rerun()
                     
                     elif step == 2:
@@ -875,19 +1063,11 @@ with tab1:
         if not all_nodes:
             st.info("Chưa có thẻ RFID nào được đăng ký. Hãy ghim thẻ đầu tiên lên bản đồ.")
         else:
-            hdr = st.columns([1.5, 3, 1.5, 1.2, 1.2, 1, 1])
-            hdr[0].markdown("**🆔 Node ID**")
-            hdr[1].markdown("**🏷️ Tên vị trí**")
-            hdr[2].markdown("**🏢 Loại**")
-            hdr[3].markdown("**X**")
-            hdr[4].markdown("**Y**")
-            hdr[5].markdown("**Sửa**")
-            hdr[6].markdown("**Xóa**")
-            st.divider()
-
             editing = st.session_state.editing_node
 
             for node_id, ndata in all_nodes:
+                is_rfid = ndata.get('is_rfid', True)
+                
                 if editing == node_id:
                     with st.container(border=True):
                         st.markdown(f"**✏️ Đang sửa node:** `{node_id}`")
@@ -906,92 +1086,94 @@ with tab1:
                             st.session_state.editing_node = None
                             st.rerun()
                 else:
-                    is_rfid = ndata.get('is_rfid', True)
-                    row = st.columns([1.5, 3, 1.5, 1.2, 1.2, 1, 1])
-                    row[0].code(str(node_id))
-                    uids = ndata.get('uids', [node_id])
-                    with row[1]:
-                        st.write(ndata.get('label', '—') or '—')
-                    
-                    with row[2]:
-                        if is_rfid:
-                            st.info("RFID", icon="🎟️")
-                        else:
-                            st.write("Waypoint ⚪")
+                    with st.container(border=True):
+                        c_info, c_uids, c_actions = st.columns([3.5, 4, 1.5])
                         
-                        # List UIDs with small delete buttons for secondary ones
-                        uid_cols = st.columns([1, 1, 1])
-                        for i, u in enumerate(uids):
-                            col_idx = i % 3
-                            with uid_cols[col_idx]:
-                                if u == node_id:
-                                    st.caption(f"🆔 `{u}`")
-                                else:
-                                    if st.button(f"X `{u}`", key=f"del_uid_{node_id}_{u}", help=f"Xóa UID {u}", type="secondary"):
-                                        if gm.remove_secondary_uid(node_id, u):
-                                            st.rerun()
-
-                        # Add UID Input & Scan Button
-                        add_uid_key = f"add_uid_input_{node_id}"
-                        # Ensure key exists in state to avoid initialization issues
-                        if add_uid_key not in st.session_state:
-                            st.session_state[add_uid_key] = ""
-
-                        col_input, col_scan = st.columns([1.5, 1])
-                        
-                        def handle_add_uid():
-                            val = st.session_state[add_uid_key].strip()
-                            if val:
-                                if gm.add_secondary_uid(node_id, val):
-                                    st.toast(f"✅ Đã thêm {val} cho node {node_id}")
-                                    st.session_state[add_uid_key] = "" # Clear after success
-                                else:
-                                    st.error(f"❌ UID {val} đã tồn tại!")
-
-                        new_uid = col_input.text_input(
-                            "➕ UID", 
-                            key=add_uid_key, 
-                            label_visibility="collapsed", 
-                            placeholder="Thêm UID...",
-                            on_change=handle_add_uid
-                        )
-                        
-                        if HAS_RFID:
-                            if col_scan.button("🔍 Quét", key=f"scan_btn_{node_id}", help="Quét thẻ để gán vào node này", width='stretch'):
-                                with st.spinner(f"Đang chờ thẻ cho {node_id}..."):
-                                    reader = get_rfid_reader()
-                                    try:
-                                        scanned = reader.read_uid_hex(timeout=3.0)
-                                        if scanned:
-                                            if gm.add_secondary_uid(node_id, scanned):
-                                                st.toast(f"✅ Đã gán {scanned} cho {node_id}")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"❌ UID {scanned} đã tồn tại!")
+                        with c_info:
+                            st.markdown(f"**🆔 Node ID:** `{node_id}`")
+                            st.markdown(f"**🏷️ Tên vị trí:** {ndata.get('label', '—')}")
+                            lbl_type = "🎟️ Thẻ RFID" if is_rfid else "⚪ Waypoint (Chỉ dẫn)"
+                            st.markdown(f"**🏢 Loại:** {lbl_type}")
+                            st.markdown(f"**📍 Tọa độ:** X: `{ndata['x']:.1f}` | Y: `{ndata['y']:.1f}`")
+                            
+                        with c_uids:
+                            if is_rfid:
+                                uids = ndata.get('uids', [node_id])
+                                st.markdown("**🔗 Danh sách UIDs (Thẻ) liên kết:**")
+                                
+                                uid_cols = st.columns(3)
+                                for i, u in enumerate(uids):
+                                    with uid_cols[i % 3]:
+                                        if u == node_id:
+                                            st.caption(f"Gốc: `{u}`")
                                         else:
-                                            st.warning("⚠️ Hết thời gian chờ (Timeout)")
-                                    except Exception as e:
-                                        st.error(f"Lỗi: {e}")
-                        else:
-                            col_scan.button("🔍 Quét", disabled=True, key=f"scan_btn_off_{node_id}", width='stretch')
+                                            if st.button(f"✖ `{u}`", key=f"del_uid_{node_id}_{u}", help=f"Xóa UID khỏi node", type="secondary"):
+                                                if gm.remove_secondary_uid(node_id, u):
+                                                    st.rerun()
+                                
+                                with st.expander("➕ Quét hoặc Thêm UIDs thủ công", expanded=False):
+                                    add_uid_key = f"add_uid_input_{node_id}"
+                                    if add_uid_key not in st.session_state:
+                                        st.session_state[add_uid_key] = ""
+                                        
+                                    col_input, col_scan = st.columns([2, 1])
+                                    
+                                    def make_handler(n_id, n_key):
+                                        def _handler():
+                                            val = st.session_state[n_key].strip()
+                                            if val:
+                                                if gm.add_secondary_uid(n_id, val):
+                                                    st.toast(f"✅ Đã thêm {val} cho node {n_id}")
+                                                    st.session_state[n_key] = ""
+                                                else:
+                                                    st.error(f"❌ UID {val} đã tồn tại!")
+                                        return _handler
+                                        
+                                    col_input.text_input(
+                                        "Nhập mã HEX UID:", 
+                                        key=add_uid_key, 
+                                        placeholder="VD: A0-B1-...",
+                                        on_change=make_handler(node_id, add_uid_key),
+                                        label_visibility="collapsed"
+                                    )
+                                    
+                                    if HAS_RFID:
+                                        if col_scan.button("🔍 Quét Bằng Máy", key=f"scan_btn_{node_id}", width='stretch'):
+                                            with st.spinner(f"Chờ thẻ {node_id}..."):
+                                                reader = get_rfid_reader()
+                                                try:
+                                                    scanned = reader.read_uid_hex(timeout=3.0)
+                                                    if scanned:
+                                                        if gm.add_secondary_uid(node_id, scanned):
+                                                            st.toast(f"✅ Đã gán {scanned} cho {node_id}")
+                                                            st.rerun()
+                                                        else:
+                                                            st.error(f"❌ UID {scanned} đã tồn tại!")
+                                                    else:
+                                                        st.warning("⚠️ Timeout!")
+                                                except Exception as e:
+                                                    st.error(f"Lỗi: {e}")
+                                    else:
+                                        col_scan.button("🔍 Quét Bằng Máy", disabled=True, key=f"scan_btn_off_{node_id}", width='stretch')
+                            else:
+                                st.info("ℹ️ Node dạng Waypoint không có Thẻ RFID vật lý liên kết.")
 
-                    row[3].write(f"{ndata['x']:.1f}")
-                    row[4].write(f"{ndata['y']:.1f}")
-                    if row[5].button("✏️", key=f"edit_btn_{node_id}", help="Sửa node này"):
-                        st.session_state.editing_node = node_id
-                        st.rerun()
-                    if row[6].button("🗑️", key=f"del_btn_{node_id}", help="Xóa node này"):
-                        gm.delete_node(node_id)
-                        if st.session_state.get('s_node') == node_id:
-                            st.session_state.s_node = None
-                        if st.session_state.get('e_node') == node_id:
-                            st.session_state.e_node = None
-                        if node_id in st.session_state.get("multi_waypoints", []):
-                            st.session_state.multi_waypoints.remove(node_id)
-                        if node_id == st.session_state.get("multi_start"):
-                            st.session_state.multi_start = None
-                        st.session_state.current_path = []
-                        st.rerun()
+                        with c_actions:
+                            if st.button("✏️ Sửa", key=f"edit_btn_{node_id}", width='stretch'):
+                                st.session_state.editing_node = node_id
+                                st.rerun()
+                            if st.button("🗑️ Xóa", key=f"del_btn_{node_id}", width='stretch', type="primary"):
+                                gm.delete_node(node_id)
+                                if st.session_state.get('s_node') == node_id:
+                                    st.session_state.s_node = None
+                                if st.session_state.get('e_node') == node_id:
+                                    st.session_state.e_node = None
+                                if node_id in st.session_state.get("multi_waypoints", []):
+                                    st.session_state.multi_waypoints.remove(node_id)
+                                if node_id == st.session_state.get("multi_start"):
+                                    st.session_state.multi_start = None
+                                st.session_state.current_path = []
+                                st.rerun()
 
     # ──────────────────────────────────────────────
     # SECTION 3: Turn Instructions & Path Display
@@ -1009,9 +1191,16 @@ with tab1:
                 dy = gm.graph.nodes[nxt]['y'] - gm.graph.nodes[curr]['y']
                 target_ang = math.degrees(math.atan2(dy, dx))
                 
-                diff = (target_ang - initial_heading) % 360
+                # Normalize target_ang to [0, 360) to match initial_heading logic
+                target_ang_norm = target_ang % 360
+                
+                diff = (target_ang_norm - initial_heading) % 360
                 if diff > 180: diff -= 360
                 
+                # Debug logging (visible in terminal)
+                print(f"[DEBUG] Orientation: curr={curr}, nxt={nxt}, dx={dx}, dy={dy}")
+                print(f"[DEBUG] target_ang={target_ang:.2f}, initial={initial_heading}, diff={diff:.2f}")
+
                 if -25 <= diff <= 25: turn = "Hướng ban đầu: Đã đúng hướng ⬆️"
                 elif 25 < diff <= 135: turn = "Hướng ban đầu: Cần rẽ TRÁI ⬅️"
                 elif -135 <= diff < -25: turn = "Hướng ban đầu: Cần rẽ PHẢI ➡️"
@@ -1097,9 +1286,7 @@ with tab1:
             run_col, stop_col = st.columns(2)
 
             if run_col.button("🚀 BẮT ĐẦU CHẠY XE (RUN MISSION)"):
-                target = st.session_state.get('e_node') or (
-                    st.session_state.multi_start if st.session_state.tour_visit_order else None
-                )
+                target = st.session_state.current_path[-1] if st.session_state.get('current_path') else None
                 if not target:
                     st.error("⚠️ XE KHÔNG BIẾT ĐI ĐÂU! Vui lòng lên lộ trình trước khi chạy xe!")
                     st.stop()
@@ -1120,15 +1307,26 @@ with tab1:
                     for u in node_uids:
                         rfid_map[u] = n
 
+                # Safety: Stop any existing car instance before starting a new one
+                if 'car_instance' in st.session_state:
+                    try:
+                        st.session_state.car_instance.stop_system()
+                        time.sleep(0.2) # Give it a moment to stop
+                    except:
+                        pass
+
                 from autonomous_main import AutonomousCar
                 car = AutonomousCar(
                     target_node=target,
                     graph=graph_adj,
-                    turn_table=TURN_CONFIG if isinstance(TURN_CONFIG, dict) else {},
+                    turn_table={},
                     rfid_map=rfid_map,
                     turn_config=st.session_state.turn_config,
                     predefined_path=st.session_state.current_path,
                     initial_heading=st.session_state.get("initial_heading", 0),
+                    speed_px_per_sec=float(gm.speed_px_per_sec),
+                    lane_mode=st.session_state.lane_mode,
+                    perspective_src=st.session_state.perspective_src
                 )
                 st.session_state.car_instance = car
                 st.session_state.car_thread = threading.Thread(target=car.execute, daemon=True)
@@ -1142,7 +1340,7 @@ with tab1:
             
             render_live_logs()
 
-with tab3:
+if active_tab == "tab3":
     st.header("🎮 Điều Khiển Thủ Công (WASD)")
     # Live Camera with Media Controls inside this tab
     render_live_camera_and_status(show_media_controls=True, key_suffix="wasd")
@@ -1150,7 +1348,7 @@ with tab3:
     render_wasd_manual_controls()
 
 
-with tab4:
+if active_tab == "tab4":
     st.header("🛑 Traffic Sign Realtime Debugger")
     st.info("Tab này kéo trực tiếp frame từ luồng camera để phân tích độc lập giúp bạn dễ dàng hiệu chỉnh thông số màu sắc của các biển báo.")
     if HAS_HW:
@@ -1191,10 +1389,15 @@ with tab4:
                             
                 st.markdown("### Luồng phân tích (Realtime)")
                 col1, col2 = st.columns(2)
+                
+                # Pre-encode frames to bytes so Streamlit does not lose them in garbage collection
+                _, buffer_annotated = cv2.imencode('.jpg', annotated)
+                _, buffer_mask = cv2.imencode('.jpg', mask)
+                
                 with col1:
-                    st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Camera + Detections", use_container_width=True)
+                    st.image(buffer_annotated.tobytes(), caption="Camera + Detections", width='stretch')
                 with col2:
-                    st.image(mask, caption="HSV Blue Mask", use_container_width=True, clamp=True)
+                    st.image(buffer_mask.tobytes(), caption="HSV Blue Mask", width='stretch', clamp=True)
                     
                 st.markdown("### Nhật ký Mới nhất:")
                 if detection_logs:

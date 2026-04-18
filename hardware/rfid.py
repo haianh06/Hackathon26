@@ -1,15 +1,27 @@
 import time
 from hardware.mfrc522_lib import MFRC522
 
+_rfid_instance = None
+
 class RFIDReader:
+    def __new__(cls):
+        global _rfid_instance
+        if _rfid_instance is None:
+            _rfid_instance = super(RFIDReader, cls).__new__(cls)
+            _rfid_instance._initialized = False
+        return _rfid_instance
+
     def __init__(self):
+        if self._initialized:
+            return
         """
         Khởi tạo RC522
         SPI: spidev0.0
         RST: GPIO22 (đã fix trong MFRC522.py)
         """
         self.reader = MFRC522()
-        print("📡 RFID RC522 initialized")
+        self._initialized = True
+        print("📡 RFID RC522 initialized (Singleton)")
 
     def read_uid(self, timeout=None):
         """

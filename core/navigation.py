@@ -60,8 +60,8 @@ class NavEngine:
         dx = self.nodes[next_node]['x'] - self.nodes[curr_node]['x']
         dy = self.nodes[next_node]['y'] - self.nodes[curr_node]['y']
         target_angle = math.degrees(math.atan2(dy, dx))
-
-        diff = (target_angle - initial_heading) % 360
+        
+        diff = (target_angle % 360 - initial_heading % 360) % 360
         if diff > 180: diff -= 360
 
         if -25 <= diff <= 25: return "STRAIGHT"
