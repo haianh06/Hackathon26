@@ -1,14 +1,17 @@
 import time
+import threading
 from hardware.mfrc522_lib import MFRC522
 
 _rfid_instance = None
+_rfid_lock = threading.Lock()
 
 class RFIDReader:
     def __new__(cls):
         global _rfid_instance
-        if _rfid_instance is None:
-            _rfid_instance = super(RFIDReader, cls).__new__(cls)
-            _rfid_instance._initialized = False
+        with _rfid_lock:
+            if _rfid_instance is None:
+                _rfid_instance = super(RFIDReader, cls).__new__(cls)
+                _rfid_instance._initialized = False
         return _rfid_instance
 
     def __init__(self):
@@ -35,13 +38,15 @@ class RFIDReader:
                 if time.time() - start_time > timeout:
                     return None
 
-            time.sleep(0.1)
+            time.sleep(0.01)
 
     def read_uid_hex(self, timeout=None):
         uid = self.read_uid(timeout)
         if uid is None:
             return None
-        return ''.join(f'{x:02X}' for x in uid)
+        uid_hex = ''.join(f'{x:02X}' for x in uid)
+        print(f"📡 RFID Scanned: {uid_hex}")
+        return uid_hex
 
     def cleanup(self):
         self.reader.cleanup()

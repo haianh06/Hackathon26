@@ -174,3 +174,17 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+# Project-specific ignores
+data/recordings/*
+data/snapshots/*
+data/sign_snapshots/*
+scratch/
+rfid_test.log
+.lgd-*
+*.mp4
+*.jpg
+*.jpeg
+*.png
+!data/templates/*.png
+!data/templates/.gitkeep

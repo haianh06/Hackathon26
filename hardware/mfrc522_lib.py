@@ -136,16 +136,25 @@ class MFRC522:
 
     # ===== INIT =====
     def MFRC522_Init(self):
-        lgpio.gpio_write(self.gpio, self.NRSTPD, 1)
+        try:
+            # Set RST pin HIGH to enable the chip
+            lgpio.gpio_write(self.gpio, self.NRSTPD, 1)
+        except lgpio.error as e:
+            # If busy or error, we just log and hope the existing handle is 1
+            print(f"?? Warning: Could not write to RST pin: {e}")
+            
         time.sleep(0.05)
 
-        self.Write_MFRC522(self.TModeReg, 0x8D)
-        self.Write_MFRC522(self.TPrescalerReg, 0x3E)
-        self.Write_MFRC522(self.TReloadRegL, 30)
-        self.Write_MFRC522(self.TReloadRegH, 0)
-        self.Write_MFRC522(self.TxAutoReg, 0x40)
-        self.Write_MFRC522(self.ModeReg, 0x3D)
-        self.AntennaOn()
+        try:
+            self.Write_MFRC522(self.TModeReg, 0x8D)
+            self.Write_MFRC522(self.TPrescalerReg, 0x3E)
+            self.Write_MFRC522(self.TReloadRegL, 30)
+            self.Write_MFRC522(self.TReloadRegH, 0)
+            self.Write_MFRC522(self.TxAutoReg, 0x40)
+            self.Write_MFRC522(self.ModeReg, 0x3D)
+            self.AntennaOn()
+        except Exception as e:
+            print(f"?? SPI Init Error: {e}")
 
     def cleanup(self):
         self.spi.close()

@@ -12,5 +12,13 @@
             "V_105"
         ],
         "initial_heading": 270
+    },
+    "A Round": {
+        "multi_start": "W_19",
+        "multi_waypoints": [
+            "D25CD6055D",
+            "A64D6E0580"
+        ],
+        "initial_heading": 180
     }
 }

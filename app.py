@@ -98,6 +98,9 @@ if "segment_breaks" not in st.session_state:
 if "multi_click_step" not in st.session_state:
     st.session_state.multi_click_step = 0
 
+if "map_key" not in st.session_state:
+    st.session_state.map_key = 0
+
 # ── Turn config persistence ───────────────────────────────────────────────────
 # ... existing turn config init ...
 
@@ -320,6 +323,22 @@ def render_live_logs():
         log_container.code("\n".join(logs) if logs else "No logs yet...")
     else:
         log_container.info("Logs will appear here when route starts.")
+
+@st.fragment(run_every=2.0)
+def render_sign_gallery():
+    if 'car_instance' in st.session_state:
+        snapshots = getattr(st.session_state.car_instance, 'sign_snapshots', [])
+        if snapshots:
+            st.markdown("### 📸 Traffic Sign Snapshots")
+            cols = st.columns(min(len(snapshots), 5))
+            for i, img_path in enumerate(reversed(snapshots)):
+                if i >= 5: break # Show only last 5 in the row
+                try:
+                    with cols[i]:
+                        st.image(img_path, use_container_width=True)
+                        st.caption(os.path.basename(img_path))
+                except:
+                    pass
 
 @st.fragment
 def render_wasd_manual_controls():
@@ -550,6 +569,18 @@ if active_tab == "tab2":
     )
 
     turn_cfg = st.session_state.turn_config
+    
+    with st.container(border=True):
+        st.markdown("**🚀 Lái thẳng trước khi rẽ (Straight-before-turn)**")
+        st.caption("Khoảng thời gian xe đi thẳng thêm một chút sau khi đến Node trước khi bắt đầu thực hiện lệnh rẽ.")
+        new_straight = st.number_input(
+            "Thời gian lái thẳng (giây)",
+            value=float(turn_cfg.get("STRAIGHT", 1.0)),
+            min_value=0.0, max_value=5.0, step=0.1,
+            key="cal_straight",
+            help="Tăng giá trị này nếu xe rẽ quá sớm (chưa tới tâm ngã rẽ)"
+        )
+
     tc_col1, tc_col2 = st.columns(2)
 
     with tc_col1:
@@ -607,10 +638,14 @@ if active_tab == "tab2":
     
     st.write("")
     if st.button("💾 Lưu Cấu Hình Rẽ", type="primary", width='stretch'):
-        new_cfg = {"90_DEG": new_90, "180_DEG": new_180}
+        new_cfg = {
+            "90_DEG": new_90, 
+            "180_DEG": new_180,
+            "STRAIGHT": new_straight
+        }
         _save_turn_config(new_cfg)
         st.session_state.turn_config = new_cfg
-        st.success(f"✅ Đã lưu: 90° = {new_90}s | 180° = {new_180}s")
+        st.success(f"✅ Đã lưu: 90° = {new_90}s | 180° = {new_180}s | Thẳng = {new_straight}s")
 
     st.caption(f"📌 Cấu hình hiện tại: 90° = {turn_cfg.get('90_DEG')}s | 180° = {turn_cfg.get('180_DEG')}s")
 
@@ -938,7 +973,7 @@ if active_tab == "tab1":
     )
 
     try:
-        selection = st.plotly_chart(fig, on_select="rerun", selection_mode="points", width='stretch')
+        selection = st.plotly_chart(fig, on_select="rerun", selection_mode="points", width='stretch', key=f"main_map_{st.session_state.map_key}")
         if selection and hasattr(selection, "selection") and "points" in selection.selection:
             pts = selection.selection["points"]
             if pts and click_action != "Không làm gì":
@@ -972,6 +1007,7 @@ if active_tab == "tab1":
                             w_id = gm._new_waypoint_id()
                             gm.add_node(clk_x, clk_y, w_id, label="", is_rfid=False)
                             st.success(f"✅ Đã thêm Waypoint **{w_id}** tại ({clk_x:.1f}, {clk_y:.1f})")
+                        st.session_state.map_key += 1
                         st.rerun()
 
                 # ── Mode: Lập Kế Hoạch 3 Bước ──────────────────────────────
@@ -989,6 +1025,7 @@ if active_tab == "tab1":
                             st.session_state.multi_start = node_id
                             st.session_state.s_node = node_id
                             st.session_state.multi_click_step = 1
+                            st.session_state.map_key += 1
                             st.rerun()
                     
                     elif step == 1:
@@ -1010,6 +1047,7 @@ if active_tab == "tab1":
                         st.session_state.current_path = []
                         st.session_state.tour_visit_order = []
                         st.session_state.segment_breaks = []
+                        st.session_state.map_key += 1
                         st.rerun()
                     
                     elif step == 2:
@@ -1021,14 +1059,10 @@ if active_tab == "tab1":
 
                         if node_id and str(node_id) in gm.graph:
                             node_id = str(node_id)
-                            if node_id == st.session_state.multi_start:
-                                st.toast("⚠️ Điểm xuất phát đã được chọn.", icon="⚠️")
-                            elif node_id in st.session_state.multi_waypoints:
-                                st.toast(f"ℹ️ Node `{node_id}` đã có trong danh sách.", icon="ℹ️")
-                            else:
-                                st.session_state.multi_waypoints.append(node_id)
-                                st.session_state.current_path = [] 
-                                st.rerun()
+                            st.session_state.multi_waypoints.append(node_id)
+                            st.session_state.current_path = [] 
+                            st.session_state.map_key += 1
+                            st.rerun()
 
                 # ── Mode: RFID Pin ────────────────────────────────────────
                 elif click_action == "📍 Ghim thẻ RFID mới (Dùng mã đã khai báo ở trên)":
@@ -1047,6 +1081,7 @@ if active_tab == "tab1":
                             st.success(f"✅ Đã ghim thẻ **{id_str}** ({lbl_str}) tại ({clk_x:.1f}, {clk_y:.1f})!")
                             st.session_state.rfid_pending = None
                             st.session_state.last_scanned_uid = ""
+                            st.session_state.map_key += 1
                             st.rerun()
 
     except TypeError:
@@ -1337,6 +1372,7 @@ if active_tab == "tab1":
                     st.success("Đã kích hoạt phanh khẩn cấp!")
             
             render_live_logs()
+            render_sign_gallery()
 
 if active_tab == "tab3":
     st.header("🎮 Điều Khiển Thủ Công (WASD)")

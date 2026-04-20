@@ -16,8 +16,8 @@ class SignClassifier:
     
     def __init__(self, 
                  templates_dir: str = 'templates',
-                 template_size: Tuple[int, int] = (64, 64),
-                 template_matching_threshold: float = 0.7):
+                 template_size: Tuple[int, int] = (32, 32),
+                 template_matching_threshold: float = 0.65):
         self.templates_dir = Path(templates_dir)
         self.template_size = template_size
         self.threshold = template_matching_threshold
@@ -35,10 +35,7 @@ class SignClassifier:
     
     def load_templates(self) -> None:
         """
-        Load template images from the templates directory.
-        
-        Raises:
-            FileNotFoundError: If template directory or files don't exist
+        Load template images in grayscale.
         """
         if not self.templates_dir.exists():
             raise FileNotFoundError(f"Templates directory not found: {self.templates_dir}")
@@ -51,38 +48,36 @@ class SignClassifier:
                 self.templates[sign_type] = None
                 continue
             
-            # Load template image in grayscale to make it color-agnostic
+            # Load template image in grayscale
             template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
             if template is None:
                 print(f"Warning: Failed to load template: {template_path}")
                 self.templates[sign_type] = None
                 continue
             
-            # Resize to standard size
+            # Resize and normalize template
             template_resized = cv2.resize(template, self.template_size)
-            _, template_binary = cv2.threshold(template_resized, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-            self.templates[sign_type] = template_binary
+            
+            # Use CLAHE on template as well for consistency
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+            template_norm = clahe.apply(template_resized)
+            
+            self.templates[sign_type] = template_norm
     
     def template_matching(self, roi: np.ndarray) -> Tuple[str, float]:
         """
-        Classify a ROI using template matching (normalized cross-correlation).
-        
-        Uses cv2.TM_CCOEFF_NORMED for robust normalized matching.
-        
-        Args:
-            roi (np.ndarray): Region of Interest to classify
-            
-        Returns:
-            Tuple[str, float]: Classification result (sign_type, confidence)
+        Classify a ROI using Grayscale Normalized Cross-Correlation.
         """
-        # Resize ROI to match template size
+        # 1. Resize and Grayscale
         roi_resized = cv2.resize(roi, self.template_size)
         if len(roi_resized.shape) == 3:
             roi_gray = cv2.cvtColor(roi_resized, cv2.COLOR_RGB2GRAY)
         else:
             roi_gray = roi_resized
             
-        _, roi_binary = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        # 2. Normalize ROI lighting (matching the template preprocessing)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        roi_norm = clahe.apply(roi_gray)
         
         best_match = None
         best_confidence = -1.0
@@ -91,21 +86,16 @@ class SignClassifier:
             if template is None:
                 continue
             
-            # Perform template matching on binary image
-            result = cv2.matchTemplate(roi_binary, template, cv2.TM_CCOEFF_NORMED)
-            
-            # Get the maximum correlation value
+            # Perform template matching on grayscale image
+            # TM_CCOEFF_NORMED is excellent for lighting invariance
+            result = cv2.matchTemplate(roi_norm, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
             
-            # Use absolute value to make it color-agnostic (handles white-on-dark AND dark-on-white)
-            max_val = abs(max_val)
-            
-            # Update best match if this confidence is higher
+            # Update best match
             if max_val > best_confidence:
                 best_confidence = max_val
                 best_match = sign_type
         
-        # Always return best match (no unknown classification)
         return best_match, best_confidence
     
     def extract_hog_features(self, roi: np.ndarray) -> np.ndarray:
