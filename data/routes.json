@@ -1,6 +1,14 @@
 {
+    "A Round": {
+        "multi_start": "W_19",
+        "multi_waypoints": [
+            "D25CD6055D",
+            "A64D6E0580"
+        ],
+        "initial_heading": 180
+    },
     "To D": {
-        "multi_start": "V_105",
+        "multi_start": "W_19",
         "multi_waypoints": [
             "D25CD6055D"
         ],
@@ -9,13 +17,18 @@
     "To V": {
         "multi_start": "D25CD6055D",
         "multi_waypoints": [
-            "V_105"
+            "W_19"
         ],
         "initial_heading": 270
     },
-    "A Round": {
+    "S": {
         "multi_start": "W_19",
         "multi_waypoints": [
+            "W_18",
+            "5985DA0503",
+            "8B23D6057B",
+            "95BB8C40E2",
+            "FA76D6055F",
             "D25CD6055D",
             "A64D6E0580"
         ],

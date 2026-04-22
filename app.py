@@ -15,6 +15,22 @@ def get_camera_manager():
     camera_manager.start()
     return camera_manager
 
+def _reinit_camera():
+    """Logic to stop, reset, and restart the camera manager."""
+    try:
+        cm = get_camera_manager()
+        cm.stop()
+        from hardware.camera import CameraManager
+        CameraManager._instance = None
+        get_camera_manager.clear()
+        # Next access will recreate and restart it
+        _ = get_camera_manager()
+        print("✅ Camera re-initialized successfully.")
+        return True
+    except Exception as e:
+        print(f"❌ Error re-initializing camera: {e}")
+        return False
+
 try:
     from hardware.rfid import RFIDReader
     from autonomous_main import AutonomousCar
@@ -177,6 +193,12 @@ if "video_writer" not in st.session_state:
 if "recording_file" not in st.session_state:
     st.session_state.recording_file = ""
 
+if "auto_reinit_camera" not in st.session_state:
+    st.session_state.auto_reinit_camera = True
+
+if "mission_was_running" not in st.session_state:
+    st.session_state.mission_was_running = False
+
 def stop_recording():
     if st.session_state.video_writer:
         st.session_state.video_writer.release()
@@ -192,26 +214,44 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
             cam_col1, cam_col2 = st.columns([2, 1])
             with cam_col1:
                 frame = None
+                edges = None
                 if st.session_state.get("car_instance"):
                     frame = getattr(st.session_state.car_instance, 'debug_frame', None)
+                    edges = getattr(st.session_state.car_instance, 'edges_frame', None)
                 
                 if frame is None:
                     frame = get_camera_manager().get_frame() if HAS_HW else None
                 
                 if frame is not None:
                     if st.session_state.is_recording and st.session_state.video_writer:
-                        # OpenCV VideoWriter expects BGR, frame is BGR natively now
                         st.session_state.video_writer.write(frame)
 
+                    # Encode main frame
                     _, buffer = cv2.imencode('.jpg', frame)
                     img_base64 = base64.b64encode(buffer).decode()
                     
+                    # Encode edges frame if available
+                    edges_html = ""
+                    if edges is not None:
+                        _, e_buffer = cv2.imencode('.jpg', edges)
+                        e_base64 = base64.b64encode(e_buffer).decode()
+                        edges_html = f"""
+                        <div style="flex: 1; min-width: 200px;">
+                            <img src="data:image/jpeg;base64,{e_base64}" 
+                                 style="width: 100%; display: block; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                            <div style="text-align: center; color: #888; font-size: 0.8em; margin-top: 5px;">Canny Edge Algorithm</div>
+                        </div>
+                        """
+
                     st.markdown(
                         f"""
-                        <div style="width: 100%; margin-bottom: 20px;">
-                            <img src="data:image/jpeg;base64,{img_base64}" 
-                                 style="width: 100%; display: block; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
-                            <div style="text-align: center; color: #888; font-size: 0.8em; margin-top: 5px;">Live Camera Feed</div>
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 20px;">
+                            <div style="flex: 1; min-width: 200px;">
+                                <img src="data:image/jpeg;base64,{img_base64}" 
+                                     style="width: 100%; display: block; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                                <div style="text-align: center; color: #888; font-size: 0.8em; margin-top: 5px;">Live Camera (Debug)</div>
+                            </div>
+                            {edges_html}
                         </div>
                         """,
                         unsafe_allow_html=True
@@ -223,6 +263,14 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                 is_auton = st.session_state.get("car_instance") and st.session_state.car_instance.is_active
                 label_prefix = "Vehicle Mode" if key_suffix == "main" else "Vehicle Mode (Manual)"
                 st.metric(label_prefix, "Autonomous" if is_auton else "Standby")
+                
+                auto_reinit = st.checkbox(
+                    "🔄 Tự động init lại camera khi dừng", 
+                    value=st.session_state.auto_reinit_camera,
+                    key=f"auto_reinit_chk_{key_suffix}",
+                    help="Nếu bật, camera sẽ tự động khởi động lại mỗi khi hành trình kết thúc hoặc bị dừng."
+                )
+                st.session_state.auto_reinit_camera = auto_reinit
                 
                 if show_media_controls:
                     # ── Cấu hình thời gian (Timings) ──
@@ -313,6 +361,14 @@ def render_live_logs():
     
     # Sync simulator position with real car if running
     car_alive = 'car_thread' in st.session_state and st.session_state.car_thread.is_alive()
+    
+    # Auto-reinit logic when mission naturally ends or is stopped elsewhere
+    if not car_alive and st.session_state.get('mission_was_running', False):
+        st.session_state.mission_was_running = False
+        if st.session_state.get('auto_reinit_camera', True):
+            _reinit_camera()
+            st.toast("✅ Hành trình kết thúc. Camera đã được tự động init lại!")
+
     if car_alive and 'car_instance' in st.session_state:
         curr = getattr(st.session_state.car_instance, 'current_node', None)
         if curr:
@@ -1363,13 +1419,19 @@ if active_tab == "tab1":
                 )
                 st.session_state.car_instance = car
                 st.session_state.car_thread = threading.Thread(target=car.execute, daemon=True)
+                st.session_state.mission_was_running = True
                 st.session_state.car_thread.start()
                 st.success("Đã gửi API điều hướng xuống vi điều khiển xe!")
 
             if stop_col.button("🛑 DỪNG XE KHẨN CẤP (STOP)"):
                 if 'car_instance' in st.session_state:
                     st.session_state.car_instance.stop_system()
+                    st.session_state.mission_was_running = False
                     st.success("Đã kích hoạt phanh khẩn cấp!")
+                    if st.session_state.auto_reinit_camera:
+                        with st.spinner("Đang init lại camera..."):
+                            _reinit_camera()
+                            st.toast("✅ Camera đã được init lại!")
             
             render_live_logs()
             render_sign_gallery()

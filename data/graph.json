@@ -127,6 +127,11 @@
                 "97CFD6058B"
             ],
             "is_rfid": true
+        },
+        "V_108": {
+            "x": 95.0,
+            "y": 85.0,
+            "label": ""
         }
     },
     "edges": [
@@ -168,8 +173,8 @@
         },
         {
             "u": "W_19",
-            "v": "A64D6E0580",
-            "weight": 1.0,
+            "v": "V_108",
+            "weight": 0.42857142857142855,
             "label": ""
         },
         {
@@ -219,9 +224,15 @@
             "v": "2BFBD40501",
             "weight": 1.0,
             "label": ""
+        },
+        {
+            "u": "A64D6E0580",
+            "v": "V_108",
+            "weight": 0.5714285714285714,
+            "label": ""
         }
     ],
-    "counter": 107,
+    "counter": 108,
     "waypoint_counter": 22,
-    "speed_px_per_sec": 5.2
+    "speed_px_per_sec": 3.0
 }

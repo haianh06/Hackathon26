@@ -17,201 +17,130 @@ import shutil
 # ============================================================
 BASE_SPEED          = 120
 TARGET_RIGHT        = 300
-SCAN_Y_RIGHT        = 0.73     # Fraction of frame height to scan at
+TARGET_LEFT         = 20
+SCAN_Y_RIGHT        = 0.65     # Fraction of frame height to scan at
 SCAN_SEARCH_UP_ROWS = 35       # How many rows upward to search for lane edge
 STEERING_GAIN       = 3        # Proportional gain
 
-PERSPECTIVE_SRC = np.float32([[120, 160], [200, 160], [300, 230], [20, 230]])
-PERSPECTIVE_DST = np.float32([[80, 0],   [240, 0],   [240, 240], [80, 240]])
 
-# ============================================================
-# Configuration — Dead-End / Turn Detection
-# ============================================================
-SIGNAL_WEIGHTS = [0.40, 0.35, 0.15, 0.10]
-GATE_MIN_FOLLOW_TIME = 2.5    
-GATE_UPPER_DENSITY   = 0.04   
-UPPER_ZONE_FRAC      = 0.75
-UPPER_WALL_THRESH    = 0.10   
-UPPER_WALL_MAX       = 0.25   
-LANE_BAND_LO         = 0.70
-LANE_BAND_HI         = 0.90  
-LANE_LINE_MIN_SPAN   = 0.38   
-LANE_LINE_MAX_ANGLE  = 15.0   
-DIAG_SCORE_THRESH    = 0.28   
-ASYMMETRY_THRESH     = 0.25
-DEAD_END_SCORE_THRESH  = 0.55
-SMOOTH_WINDOW_SIZE     = 8     
-CONFIRM_CONSECUTIVE    = 5     
-HOUGH_THRESHOLD  = 40
-HOUGH_MIN_LENGTH = 50
-HOUGH_MAX_GAP    = 25
-ROI_SIDE_STRIP = 0.08
-TURN_DURATION = 1.2
-COOLDOWN_TIME = 2.0
-
-# ============================================================
-# Dead-End Detector (Standalone)
-# ============================================================
-class DeadEndDetector:
-    def __init__(self):
-        self._score_history  = deque(maxlen=SMOOTH_WINDOW_SIZE)
-        self._consec_count   = 0
-        self._follow_start   = None
-
-    def notify_follow_start(self):
-        self._follow_start  = time.time()
-        self._consec_count  = 0
-        self._score_history.clear()
-
-    def detect(self, canny_frame):
-        h, w = canny_frame.shape
-        strip = int(w * ROI_SIDE_STRIP)
-        roi = canny_frame.copy()
-        roi[:, :strip]     = 0
-        roi[:, w - strip:] = 0
-
-        upper_end   = int(h * UPPER_ZONE_FRAC)
-        lane_lo     = int(h * LANE_BAND_LO)
-        lane_hi     = int(h * LANE_BAND_HI)
-
-        t_in_follow = (time.time() - self._follow_start if self._follow_start is not None else 0.0)
-        gate_time_ok = t_in_follow >= GATE_MIN_FOLLOW_TIME
-        upper_zone     = roi[:upper_end, :]
-        upper_density  = np.count_nonzero(upper_zone) / (upper_zone.size + 1e-6)
-        gate_density_ok = upper_density >= GATE_UPPER_DENSITY
-        gate_open = gate_time_ok and gate_density_ok
-
-        signals = {
-            "gate_open": gate_open, "gate_time_ok": gate_time_ok, "gate_density_ok": gate_density_ok,
-            "t_in_follow": t_in_follow, "upper_density": upper_density, "lower_density": 0.0,
-            "ul_ratio": 0.0, "ul_score": 0.0, "lane_long_horiz": 0, "lane_loss": 0.0,
-            "upper_total": 0, "upper_diagonal": 0, "upper_diag_ratio": 0.0, "diag_score": 0.0,
-            "asymmetry": 0.0, "total_lines": 0, "raw_votes": [0.0, 0.0, 0.0, 0.0], "raw_score": 0.0,
-            "smoothed_score": float(np.mean(self._score_history)) if self._score_history else 0.0,
-            "consec_count": self._consec_count,
-        }
-        if not gate_open:
-            self._consec_count = 0
-            return False, None, signals, signals["smoothed_score"]
-
-        wall_score = min(1.0, max(0.0, (upper_density - UPPER_WALL_THRESH) / (UPPER_WALL_MAX - UPPER_WALL_THRESH + 1e-6)))
-        lower_zone    = roi[lane_hi:, :]
-        lower_density = np.count_nonzero(lower_zone) / (lower_zone.size + 1e-6)
-        ul_ratio      = upper_density / (lower_density + 1e-6)
-        ul_score      = min(1.0, max(0.0, (ul_ratio - 0.8) / 1.2))
-
-        lines = cv2.HoughLinesP(roi, 1, np.pi/180, HOUGH_THRESHOLD, minLineLength=HOUGH_MIN_LENGTH, maxLineGap=HOUGH_MAX_GAP)
-        lane_long_horiz = upper_total = upper_diagonal = left_cnt = right_cnt = total_cnt = 0
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]; total_cnt += 1
-                length = float(np.hypot(x2 - x1, y2 - y1))
-                angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1))) if x2 != x1 else 90.0
-                cy_line = (y1 + y2) / 2.0; cx_line = (x1 + x2) / 2.0
-                if (lane_lo <= cy_line <= lane_hi and angle < LANE_LINE_MAX_ANGLE and length > w * LANE_LINE_MIN_SPAN):
-                    lane_long_horiz += 1
-                if cy_line < upper_end:
-                    upper_total += 1
-                    if 15.0 < angle < 75.0: upper_diagonal += 1
-                if cx_line < w / 2: left_cnt += 1
-                else: right_cnt += 1
-
-        lane_loss = float(np.exp(-1.5 * lane_long_horiz))
-        upper_diag_ratio = upper_diagonal / (upper_total + 1e-6)
-        diag_score = min(1.0, upper_diag_ratio / (DIAG_SCORE_THRESH + 1e-6))
-        asymmetry = (right_cnt - left_cnt) / (total_cnt + 1e-6)
-        raw_votes = [wall_score, lane_loss, diag_score, min(1.0, abs(asymmetry) / (ASYMMETRY_THRESH + 1e-6))]
-        raw_score = sum(wt * v for wt, v in zip(SIGNAL_WEIGHTS, raw_votes))
-        self._score_history.append(raw_score)
-        smoothed_score = float(np.mean(self._score_history))
-        if smoothed_score >= DEAD_END_SCORE_THRESH: self._consec_count += 1
-        else: self._consec_count = 0
-        is_dead_end = self._consec_count >= CONFIRM_CONSECUTIVE
-        turn_dir = ("LEFT" if asymmetry > 0 else "RIGHT") if is_dead_end else None
-        signals.update({
-            "lower_density": lower_density, "ul_ratio": ul_ratio, "ul_score": ul_score,
-            "wall_score": wall_score, "lane_long_horiz": lane_long_horiz, "lane_loss": lane_loss,
-            "upper_total": upper_total, "upper_diagonal": upper_diagonal, "upper_diag_ratio": upper_diag_ratio,
-            "diag_score": diag_score, "asymmetry": asymmetry, "total_lines": total_cnt,
-            "raw_votes": raw_votes, "raw_score": raw_score, "smoothed_score": smoothed_score, "consec_count": self._consec_count,
-        })
-        return is_dead_end, turn_dir, signals, smoothed_score
-
-    def reset(self):
-        self._score_history.clear()
-        self._consec_count = 0
-        self._follow_start = None
 
 # ============================================================
 # Helper Functions (Standalone)
 # ============================================================
-def _get_birdseye(frame):
-    h, w = frame.shape[:2]
-    M = cv2.getPerspectiveTransform(PERSPECTIVE_SRC, PERSPECTIVE_DST)
-    return cv2.warpPerspective(frame, M, (w, h), flags=cv2.INTER_LINEAR)
 
-def _find_right_lane(edges):
-    height, width = edges.shape
-    base_y = int(height * SCAN_Y_RIGHT)
-    for offset in range(SCAN_SEARCH_UP_ROWS + 1):
-        y = base_y - offset
-        if y < 0: break
-        right_half = edges[y, width // 2 :]
-        if right_half.sum() != 0:
-            inner_x = width // 2 + int(np.argmax(right_half))
-            if inner_x < width - 1: return inner_x, y
-    return -1, base_y
+def _find_right_lane(edges, last_x=-1):
+    h, w = edges.shape
+    target_y = int(h * SCAN_Y_RIGHT)
+    
+    # 1. Tìm điểm gốc ở đáy ảnh (ưu tiên mép TRONG - gần tâm nhất)
+    # Quét từ 45% chiều rộng (lấn sang trái một chút) đến 90%
+    start_search = int(w * 0.45)
+    end_search = int(w * 0.9)
+    bottom_roi = edges[int(h*0.8):, start_search : end_search]
+    
+    if bottom_roi.sum() == 0:
+        fallback = edges[target_y, start_search : end_search]
+        if fallback.sum() == 0: return -1, target_y
+        # Lấy điểm đầu tiên bên trái (mép trong)
+        first_pixel = np.where(fallback > 0)[0][0]
+        return start_search + first_pixel, target_y
 
-def _sliding_window_lane(frame):
-    h, w = frame.shape[:2]
-    warped = _get_birdseye(frame)
-    hls = cv2.cvtColor(warped, cv2.COLOR_BGR2HLS)
-    s_channel = hls[:, :, 2]
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-    abs_sobel = np.absolute(sobelx)
-    max_sobel = np.max(abs_sobel)
-    scaled = np.uint8(255 * abs_sobel / max_sobel) if max_sobel > 0 else np.zeros_like(gray)
-    binary = np.zeros_like(s_channel)
-    binary[((s_channel > 100) & (s_channel <= 255)) | ((scaled > 50) & (scaled <= 255))] = 255
-    histogram = np.sum(binary[h // 2 :, :], axis=0)
-    midpoint = histogram.shape[0] // 2
-    rightx_base = int(np.argmax(histogram[midpoint:])) + midpoint
-    nwindows = 9
-    window_height = h // nwindows
-    nonzero = binary.nonzero()
-    nonzeroy = np.array(nonzero[0]); nonzerox = np.array(nonzero[1])
-    current_x = rightx_base; margin = 40; minpix = 50
-    right_lane_inds = []; debug_ovl = np.zeros_like(frame)
-    for window in range(nwindows):
-        win_y_low = h - (window + 1) * window_height; win_y_high = h - window * window_height
-        win_x_low = current_x - margin; win_x_high = current_x + margin
-        cv2.rectangle(debug_ovl, (win_x_low, win_y_low), (win_x_high, win_y_high), (0, 255, 0), 2)
-        good = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_x_low) & (nonzerox < win_x_high)).nonzero()[0]
-        right_lane_inds.append(good)
-        if len(good) > minpix: current_x = int(np.mean(nonzerox[good]))
-    right_lane_inds = np.concatenate(right_lane_inds)
-    rightx = nonzerox[right_lane_inds]; righty = nonzeroy[right_lane_inds]
-    if len(rightx) > 0:
-        right_fit = np.polyfit(righty, rightx, 2)
-        target_y = h * SCAN_Y_RIGHT
-        fit_x = right_fit[0] * target_y ** 2 + right_fit[1] * target_y + right_fit[2]
-        ploty = np.linspace(0, h - 1, h)
-        fit_pts = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
-        pts = np.array([np.transpose(np.vstack([fit_pts, ploty]))], np.int32)
-        cv2.polylines(debug_ovl, pts, isClosed=False, color=(0, 255, 255), thickness=3)
-        M_inv = cv2.getPerspectiveTransform(PERSPECTIVE_DST, PERSPECTIVE_SRC)
-        ovl_unwarped = cv2.warpPerspective(debug_ovl, M_inv, (w, h))
-        return int(fit_x), int(target_y), ovl_unwarped
-    return -1, int(h * SCAN_Y_RIGHT), None
+    histogram = np.sum(bottom_roi, axis=0)
+    # Bắt mọi điểm có vạch (giúp không bỏ sót nét đứt mờ ở mép trong)
+    peaks = np.where(histogram > 0)[0]
+    
+    if len(peaks) > 0:
+        current_x = start_search + peaks[0] # Chọn peak ĐẦU TIÊN từ trái sang (mép trong)
+    else:
+        return -1, target_y
+    
+    # 2. Trượt cửa sổ lên trên bám theo mép trong
+    n_windows = 5
+    win_h = int(h * 0.12)
+    margin = 40 
+    
+    lane_points = []
+    for i in range(n_windows):
+        y_low = h - (i+1) * win_h
+        y_high = h - i * win_h
+        if y_low < 0: break
+        
+        x_left = max(0, current_x - margin)
+        x_right = min(w, current_x + margin)
+        
+        win_slice = edges[y_low:y_high, x_left:x_right]
+        if win_slice.sum() > 0:
+            win_hist = np.sum(win_slice, axis=0)
+            win_peaks = np.where(win_hist > 0)[0]
+            if len(win_peaks) > 0:
+                current_x = x_left + win_peaks[0]
+                lane_points.append((current_x, (y_low + y_high) // 2))
 
-def _draw_lane_overlay(frame, right_x, y_right):
+    if not lane_points:
+        return -1, target_y
+        
+    best_point = min(lane_points, key=lambda p: abs(p[1] - target_y))
+    return best_point[0], target_y
+
+def _find_left_lane(edges, last_x=-1):
+    h, w = edges.shape
+    target_y = int(h * SCAN_Y_RIGHT)
+    
+    # Quét từ 10% đến 55% (lấn sang phải một chút)
+    start_search = int(w * 0.1)
+    end_search = int(w * 0.55)
+    bottom_roi = edges[int(h*0.8):, start_search : end_search]
+    
+    if bottom_roi.sum() == 0:
+        fallback = edges[target_y, start_search : end_search]
+        if fallback.sum() == 0: return -1, target_y
+        # Lấy điểm đầu tiên bên PHẢI (mép trong của vạch trái)
+        last_pixel = np.where(fallback > 0)[0][-1]
+        return start_search + last_pixel, target_y
+
+    histogram = np.sum(bottom_roi, axis=0)
+    peaks = np.where(histogram > 0)[0]
+    
+    if len(peaks) > 0:
+        current_x = start_search + peaks[-1] # Chọn peak CUỐI CÙNG từ trái sang (mép trong)
+    else:
+        return -1, target_y
+    
+    n_windows = 5
+    win_h = int(h * 0.12)
+    margin = 40 
+    
+    lane_points = []
+    for i in range(n_windows):
+        y_low = h - (i+1) * win_h
+        y_high = h - i * win_h
+        if y_low < 0: break
+        
+        x_left = max(0, current_x - margin)
+        x_right = min(w, current_x + margin)
+        
+        win_slice = edges[y_low:y_high, x_left:x_right]
+        if win_slice.sum() > 0:
+            win_hist = np.sum(win_slice, axis=0)
+            win_peaks = np.where(win_hist > 0)[0]
+            if len(win_peaks) > 0:
+                current_x = x_left + win_peaks[-1] # Mép trong
+                lane_points.append((current_x, (y_low + y_high) // 2))
+
+    if not lane_points:
+        return -1, target_y
+        
+    best_point = min(lane_points, key=lambda p: abs(p[1] - target_y))
+    return best_point[0], target_y
+
+def _draw_lane_overlay(frame, lane_x, lane_y, active_lane):
     h, w = frame.shape[:2]
-    if right_x != -1:
-        cv2.line(frame, (right_x, y_right), (right_x, h), (255, 80, 0), 2)
+    if lane_x != -1:
+        color = (255, 80, 0) if active_lane == "right" else (0, 255, 80)
+        cv2.line(frame, (lane_x, lane_y), (lane_x, h), color, 2)
         overlay = frame.copy()
-        pts = np.array([[w // 2, y_right], [right_x, y_right], [right_x, h], [w // 2, h]], dtype=np.int32)
-        cv2.fillPoly(overlay, [pts], (255, 80, 0))
+        pts = np.array([[w // 2, lane_y], [lane_x, lane_y], [lane_x, h], [w // 2, h]], dtype=np.int32)
+        cv2.fillPoly(overlay, [pts], color)
         cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
 
 def _draw_edge_overlay(frame, edges):
@@ -232,63 +161,72 @@ def _draw_orientation_mark(frame, steering):
     cv2.line(frame, (cx, base_y - bar_h // 2), (cx, base_y + bar_h // 2), (200, 200, 200), 1)
     cv2.putText(frame, f"Steer: {int(steering):+d}", (cx - w // 4, base_y - bar_h // 2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1)
 
-def _draw_dead_end_hud(display, signals, smoothed_score, current_state_name):
-    h, w = display.shape[:2]
-    state_color = (0, 255, 0) if "MOVING" in current_state_name or "FOLLOW" in current_state_name else (0, 0, 255)
-    cv2.putText(display, f"STATE: {current_state_name}", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, state_color, 2)
-    gate_open = signals.get("gate_open", False); t_fol = signals.get("t_in_follow", 0.0)
-    g1_ok = signals.get("gate_time_ok", False); g2_ok = signals.get("gate_density_ok", False)
-    gate_color = (0, 220, 50) if gate_open else (0, 100, 200)
-    gate_lbl = "GATE: OPEN" if gate_open else f"GATE: CLOSED (G1={'OK' if g1_ok else f'{t_fol:.1f}s'} G2={'OK' if g2_ok else 'low'})"
-    cv2.putText(display, gate_lbl, (8, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.32, gate_color, 1)
-    bar_w = int(min(1.0, smoothed_score) * (w - 16))
-    bar_color = (0, 0, 255) if smoothed_score >= DEAD_END_SCORE_THRESH else (0, 200, 50)
-    cv2.rectangle(display, (8, 44), (8 + bar_w, 54), bar_color, -1)
-    cv2.rectangle(display, (8, 44), (w - 8, 54), (180, 180, 180), 1)
-    cv2.putText(display, f"Score raw={signals.get('raw_score',0.0):.2f} smooth={smoothed_score:.2f} consec={signals.get('consec_count',0)}/{CONFIRM_CONSECUTIVE}", (8, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (220, 220, 220), 1)
-    labels = [
-        f"S1 wall_scr  : {signals.get('wall_score',0):.2f} (up={signals.get('upper_density',0):.3f})",
-        f"S2 lane_loss : {signals.get('lane_loss',0):.2f} (ln={signals.get('lane_long_horiz',0)})",
-        f"S3 diag_scr  : {signals.get('diag_score',0):.2f}",
-        f"S4 asymm     : {signals.get('asymmetry',0):+.2f}",
-    ]
-    for i, lbl in enumerate(labels):
-        cv2.putText(display, lbl, (8, 74 + i * 14), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (200, 200, 200), 1)
-    up_y = int(h * UPPER_ZONE_FRAC); ln_lo = int(h * LANE_BAND_LO); ln_hi = int(h * LANE_BAND_HI)
-    cv2.line(display, (0, up_y), (w, up_y), (100, 100, 255), 1)
-    cv2.line(display, (0, ln_lo), (w, ln_lo), (255, 180, 0), 1)
-    cv2.line(display, (0, ln_hi), (w, ln_hi), (255, 180, 0), 1)
-    strip = int(w * ROI_SIDE_STRIP)
-    cv2.line(display, (strip, 0), (strip, h), (80, 80, 0), 1)
-    cv2.line(display, (w - strip, 0), (w - strip, h), (80, 80, 0), 1)
-
-def follow_lane_frame(frame, last_right_x, detection_mode="basic"):
+def follow_lane_frame(frame, last_steering, pos_history, max_history=5):
     img_small = cv2.resize(frame, (320, 240))
-    if detection_mode == "sliding_window":
-        right_x_raw, y_right, debug_ovl = _sliding_window_lane(img_small)
-        gray = cv2.cvtColor(img_small, cv2.COLOR_BGR2GRAY); blurred = cv2.GaussianBlur(gray, (5, 5), 0); edges = cv2.Canny(blurred, 100, 200)
-        _draw_edge_overlay(img_small, edges)
-        if debug_ovl is not None: img_small = cv2.addWeighted(img_small, 1.0, debug_ovl, 0.8, 0)
+    
+    # Preprocessing
+    gray = cv2.cvtColor(img_small, cv2.COLOR_BGR2GRAY)
+    _, white_mask = cv2.threshold(gray, 155, 255, cv2.THRESH_BINARY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 70, 160)
+    edges = cv2.bitwise_and(edges, white_mask)
+    
+    _draw_edge_overlay(img_small, edges)
+    
+    right_x_raw, y_lane = _find_right_lane(edges, -1)
+    
+    # 1. Quản lý trạng thái làn và Lọc nhiễu vị trí
+    if right_x_raw != -1:
+        active_lane = "right"
+        if len(pos_history) > 0 and pos_history[0] < 160: # Chuyển từ trái sang phải -> Xóa lịch sử cũ
+            pos_history.clear()
+        pos_history.append(right_x_raw)
+        if len(pos_history) > max_history: pos_history.pop(0)
+        lane_x = int(np.mean(pos_history))
+        memory_used = False
     else:
-        gray = cv2.cvtColor(img_small, cv2.COLOR_BGR2GRAY); blurred = cv2.GaussianBlur(gray, (5, 5), 0); edges = cv2.Canny(blurred, 100, 200)
-        _draw_edge_overlay(img_small, edges)
-        right_x_raw, y_right = _find_right_lane(edges)
-    right_x = right_x_raw; memory_used = False
-    if right_x == -1 and last_right_x != -1: right_x = last_right_x; memory_used = True
-    steering = 0; mode = "search"
-    if right_x != -1:
-        mode = "right (mem)" if memory_used else "right"
-        steering = -(right_x - TARGET_RIGHT) * STEERING_GAIN
+        # Nếu mất làn phải, thử tìm làn trái
+        left_x_raw, y_lane = _find_left_lane(edges, -1)
+        if left_x_raw != -1:
+            active_lane = "left"
+            if len(pos_history) > 0 and pos_history[0] >= 160: # Chuyển từ phải sang trái -> Xóa lịch sử cũ
+                pos_history.clear()
+            pos_history.append(left_x_raw)
+            if len(pos_history) > max_history: pos_history.pop(0)
+            lane_x = int(np.mean(pos_history))
+            memory_used = False
+        else:
+            # Mất cả 2 làn, dùng lại giá trị cũ
+            lane_x = pos_history[-1] if pos_history else -1
+            active_lane = "right" if lane_x >= 160 else "left"
+            memory_used = True
+    
+    steering = 0
+    mode = "search"
+    if lane_x != -1:
+        mode = "follow"
+        # 2. Tính toán góc lái theo làn đang bám
+        if active_lane == "right":
+            target_error = lane_x - TARGET_RIGHT
+        else:
+            target_error = lane_x - TARGET_LEFT
+        steering = -target_error * 2.5 
+        
+    # 3. Bộ lọc thông thấp cho góc lái
+    if last_steering is not None:
+        steering = 0.8 * last_steering + 0.2 * steering
+        
     display = img_small.copy()
-    _draw_lane_overlay(display, right_x if right_x != -1 else -1, y_right)
-    cv2.line(display, (TARGET_RIGHT, y_right - 10), (TARGET_RIGHT, y_right + 10), (0, 255, 255), 2)
-    cv2.line(display, (0, y_right), (320, y_right), (60, 60, 60), 1)
-    cv2.line(display, (160, 0), (160, 240), (200, 200, 200), 1)
-    if right_x != -1:
-        color = (255, 80, 0) if not memory_used else (0, 200, 255)
-        cv2.circle(display, (right_x, y_right), 6, color, -1)
+    _draw_lane_overlay(display, lane_x if lane_x != -1 else -1, y_lane, active_lane)
+    
+    if active_lane == "right":
+        cv2.line(display, (TARGET_RIGHT, y_lane - 10), (TARGET_RIGHT, y_lane + 10), (0, 255, 255), 2)
+    else:
+        cv2.line(display, (TARGET_LEFT, y_lane - 10), (TARGET_LEFT, y_lane + 10), (0, 255, 255), 2)
+        
     _draw_orientation_mark(display, steering)
-    return right_x, y_right, steering, memory_used, mode, display, edges
+    
+    return lane_x, y_lane, steering, memory_used, mode, display, edges
 
 # ============================================================
 # Main Classes
@@ -317,11 +255,9 @@ class AutonomousCar:
         self._rfid = None
         self.is_active = False
         self.log_history = []
-        self.last_right_x = -1
+        self.pos_history = []
+        self.last_steering = 0
         self.base_speed = 120
-        self.target_right = 310        
-        self.scan_y_right = 0.4
-        self.scan_search_up_rows = 35
         self.debug_frame = None
         self.blind_run_end_time = None
         self.blind_run_target_node = None
@@ -331,10 +267,8 @@ class AutonomousCar:
         self._latest_uid = None
         self._rfid_lock = threading.Lock()
         self._rfid_thread = None
-
-        self.dead_end_detector = DeadEndDetector()
-        self._dead_end_signals  = {}   
-        self.detection_mode = lane_mode
+        self._rfid_lock = threading.Lock()
+        self._rfid_thread = None
 
         try:
             from core.detector import SignDetector
@@ -455,7 +389,6 @@ class AutonomousCar:
     def execute(self):
         self.is_active = True
         self._log("[START] Mission started. Target: " + str(self.target_node))
-        self.dead_end_detector.notify_follow_start()
         
         # Start RFID background thread
         self._rfid_thread = threading.Thread(target=self._rfid_background_loop, daemon=True)
@@ -580,7 +513,6 @@ class AutonomousCar:
             self._log(f"[TURN] Hành động: {action}")
             self.execute_motor_action(action)
             self.state = CarState.MOVING
-            self.dead_end_detector.notify_follow_start()
 
         elif self.state == CarState.MOVING:
             if self.blind_run_end_time is not None:
@@ -604,34 +536,21 @@ class AutonomousCar:
             motor.move_straight()
             return
 
-        # Gọi thuật toán standalone
+        # Gọi thuật toán standalone cải tiến
         right_x, y_right, steering, memory_used, mode, display_frame, edges = \
-            follow_lane_frame(raw_frame, self.last_right_x, detection_mode=self.detection_mode)
+            follow_lane_frame(raw_frame, self.last_steering, self.pos_history)
 
-        if right_x != -1 and not memory_used:
-            self.last_right_x = right_x
-
-        # ── Dead-End Detection ────────────────────────────────────────────────
-        is_dead_end, turn_dir, de_signals, de_score = self.dead_end_detector.detect(edges)
-        self._dead_end_signals = de_signals
-
-        if is_dead_end:
-            self._log(f"[DEAD-END] score={de_score:.2f} → TURN {turn_dir}")
-            motor.stop(); time.sleep(0.1)
-            if turn_dir == "LEFT": motor.turn_left()
-            else: motor.turn_right()
-            time.sleep(self.turn_config.get("90_DEG", 1.2))
-            motor.stop(); time.sleep(0.1)
-            self.dead_end_detector.notify_follow_start()
-            return
+        self.last_steering = steering
 
         # --- Traffic Sign Visualization (Asynchronous results) ---
         # No more detection here, just reading results from the background thread
         with self._sign_lock:
             current_signs = list(self.last_detected_signs)
             
-        # Draw Dead-End HUD & Sign boxes
-        _draw_dead_end_hud(display_frame, de_signals, de_score, self.state.name)
+        # Draw HUD
+        h, w = display_frame.shape[:2]
+        state_color = (0, 255, 0) if "MOVING" in self.state.name or "FOLLOW" in self.state.name else (0, 0, 255)
+        cv2.putText(display_frame, f"STATE: {self.state.name}", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, state_color, 2)
         
         raw_h, raw_w = raw_frame.shape[:2]
         h_ratio, w_ratio = 240 / raw_h, 320 / raw_w
@@ -645,6 +564,7 @@ class AutonomousCar:
             cv2.putText(display_frame, f"{sign_type} {int(conf*100)}%", (x, max(15, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
         self.debug_frame = display_frame
+        self.edges_frame = edges
 
         # Motor control
         if mode != "search": motor.drive(self.base_speed, steering)
