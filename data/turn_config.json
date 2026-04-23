@@ -1,5 +1,6 @@
 {
-    "90_DEG": 1.5,
+    "90_DEG_RIGHT": 1.3,
+    "90_DEG_LEFT": 2.3,
     "180_DEG": 3.6,
     "STRAIGHT": 2.0
 }

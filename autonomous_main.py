@@ -479,14 +479,18 @@ class AutonomousCar:
                             initial_action = self.nav.get_initial_action(self.current_node, remaining_path[0], current_heading)
                         else:
                             initial_action = self.nav.get_initial_action(self.current_node, remaining_path[0], self.initial_heading)
-                        if initial_action != "STRAIGHT": t_run += self.turn_config.get("90_DEG", 1.2)
+                        if initial_action == "RIGHT": t_run += self.turn_config.get("90_DEG_RIGHT", 1.2)
+                        elif initial_action == "LEFT": t_run += self.turn_config.get("90_DEG_LEFT", 1.2)
+                        elif initial_action != "STRAIGHT": t_run += self.turn_config.get("90_DEG", 1.2)
                         for i in range(len(remaining_path) - 1):
                             u, v = remaining_path[i], remaining_path[i+1]
                             dist = self._get_dist(u, v)
                             t_run += dist / self.speed_px_per_sec
                             prev = remaining_path[i-1] if i > 0 else self.current_node
                             action = self.nav.get_action(prev, u, v)
-                            if action != "STRAIGHT": t_run += self.turn_config.get("90_DEG", 1.2)
+                            if action == "RIGHT": t_run += self.turn_config.get("90_DEG_RIGHT", 1.2)
+                            elif action == "LEFT": t_run += self.turn_config.get("90_DEG_LEFT", 1.2)
+                            elif action != "STRAIGHT": t_run += self.turn_config.get("90_DEG", 1.2)
                         self.blind_run_end_time = time.time() + t_run
                         self.blind_run_target_node = remaining_path[-1]
                         self._log(f"[BLIND-RUN] Đích cuối ({self._get_node_label(self.blind_run_target_node)}) là Waypoint. Tổng thời gian dự kiến: {t_run:.2f}s")
@@ -570,15 +574,16 @@ class AutonomousCar:
 
     def execute_motor_action(self, action):
         t_straight = self.turn_config.get("STRAIGHT", 1.0)
-        t_90 = self.turn_config.get("90_DEG", 1.2)
+        t_90_right = self.turn_config.get("90_DEG_RIGHT", self.turn_config.get("90_DEG", 1.2))
+        t_90_left = self.turn_config.get("90_DEG_LEFT", self.turn_config.get("90_DEG", 1.2))
         t_180 = self.turn_config.get("180_DEG", 2.4)
 
         if action == "RIGHT":
             motor.move_straight(); time.sleep(t_straight)
-            motor.turn_right(); time.sleep(t_90)
+            motor.turn_right(); time.sleep(t_90_right)
         elif action == "LEFT":
             motor.move_straight(); time.sleep(t_straight)
-            motor.turn_left(); time.sleep(t_90)
+            motor.turn_left(); time.sleep(t_90_left)
         elif action =="TURN_AROUND":
             motor.turn_right(); time.sleep(t_180)
         motor.stop(); time.sleep(0.1)

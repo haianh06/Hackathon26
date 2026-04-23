@@ -151,7 +151,7 @@ TURN_CONFIG_PATH = "data/turn_config.json"
 
 def _load_turn_config() -> dict:
     """Load turn timing from JSON file, fallback to defaults."""
-    defaults = {"90_DEG": 1.7, "180_DEG": 1.8, "STRAIGHT": 1.0}
+    defaults = {"90_DEG_RIGHT": 1.3, "90_DEG_LEFT": 2.0, "180_DEG": 3.6, "STRAIGHT": 2.0}
     try:
         if os.path.exists(TURN_CONFIG_PATH):
             with open(TURN_CONFIG_PATH) as f:
@@ -276,13 +276,14 @@ def render_live_camera_and_status(show_media_controls=False, key_suffix="main"):
                     # ── Cấu hình thời gian (Timings) ──
                     with st.expander("⚙️ Cấu hình thời gian (Timings)", expanded=False):
                         cfg = st.session_state.turn_config
-                        c1, c2, c3 = st.columns(3)
+                        c1, c2, c3, c4 = st.columns(4)
                         t_straight = c1.number_input("Đi thẳng (s):", 0.0, 5.0, float(cfg.get("STRAIGHT", 1.0)), 0.1)
-                        t_90 = c2.number_input("Rẽ 90° (s):", 0.0, 5.0, float(cfg.get("90_DEG", 1.7)), 0.1)
-                        t_180 = c3.number_input("Quay đầu (s):", 0.0, 5.0, float(cfg.get("180_DEG", 1.8)), 0.1)
+                        t_90_left = c2.number_input("Rẽ trái 90° (s):", 0.0, 5.0, float(cfg.get("90_DEG_LEFT", cfg.get("90_DEG", 1.7))), 0.1)
+                        t_90_right = c3.number_input("Rẽ phải 90° (s):", 0.0, 5.0, float(cfg.get("90_DEG_RIGHT", cfg.get("90_DEG", 1.7))), 0.1)
+                        t_180 = c4.number_input("Quay đầu (s):", 0.0, 5.0, float(cfg.get("180_DEG", 1.8)), 0.1)
                         
                         if st.button("💾 Lưu Cấu Hình Thời Gian", width='stretch'):
-                            new_cfg = {"STRAIGHT": t_straight, "90_DEG": t_90, "180_DEG": t_180}
+                            new_cfg = {"STRAIGHT": t_straight, "90_DEG_LEFT": t_90_left, "90_DEG_RIGHT": t_90_right, "180_DEG": t_180}
                             st.session_state.turn_config = new_cfg
                             _save_turn_config(new_cfg)
                             st.success("✅ Đã lưu cấu hình mới!")
@@ -642,30 +643,37 @@ if active_tab == "tab2":
     with tc_col1:
         with st.container(border=True):
             st.markdown("**↩️ Rẽ 90° (Góc vuông)**")
-            new_90 = st.number_input(
-                "Thời gian rẽ 90° (giây)",
-                value=float(turn_cfg.get("90_DEG", 1.5)),
+            new_90_left = st.number_input(
+                "Thời gian rẽ trái 90° (giây)",
+                value=float(turn_cfg.get("90_DEG_LEFT", turn_cfg.get("90_DEG", 1.5))),
                 min_value=0.1, max_value=10.0, step=0.05,
-                key="cal_90deg",
-                help="Thời gian motor rẽ để xe quay đúng 90 độ"
+                key="cal_90deg_left",
+                help="Thời gian motor rẽ để xe quay đúng trái 90 độ"
+            )
+            new_90_right = st.number_input(
+                "Thời gian rẽ phải 90° (giây)",
+                value=float(turn_cfg.get("90_DEG_RIGHT", turn_cfg.get("90_DEG", 1.5))),
+                min_value=0.1, max_value=10.0, step=0.05,
+                key="cal_90deg_right",
+                help="Thời gian motor rẽ để xe quay đúng phải 90 độ"
             )
             t_col1, t_col2 = st.columns(2)
             if t_col1.button("⬅️ Test Rẽ Trái 90°", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_left()
-                    time.sleep(new_90)
+                    time.sleep(new_90_left)
                     motor.stop()
-                    st.success(f"Rẽ trái {new_90}s xong.")
+                    st.success(f"Rẽ trái {new_90_left}s xong.")
                 else:
                     st.warning("Không có HW.")
             if t_col2.button("➡️ Test Rẽ Phải 90°", width='stretch'):
                 if HAS_HW:
                     import hardware.motor as motor
                     motor.turn_right()
-                    time.sleep(new_90)
+                    time.sleep(new_90_right)
                     motor.stop()
-                    st.success(f"Rẽ phải {new_90}s xong.")
+                    st.success(f"Rẽ phải {new_90_right}s xong.")
                 else:
                     st.warning("Không có HW.")
 
@@ -695,15 +703,16 @@ if active_tab == "tab2":
     st.write("")
     if st.button("💾 Lưu Cấu Hình Rẽ", type="primary", width='stretch'):
         new_cfg = {
-            "90_DEG": new_90, 
+            "90_DEG_RIGHT": new_90_right, 
+            "90_DEG_LEFT": new_90_left, 
             "180_DEG": new_180,
             "STRAIGHT": new_straight
         }
         _save_turn_config(new_cfg)
         st.session_state.turn_config = new_cfg
-        st.success(f"✅ Đã lưu: 90° = {new_90}s | 180° = {new_180}s | Thẳng = {new_straight}s")
+        st.success(f"✅ Đã lưu: 90° Trái = {new_90_left}s | 90° Phải = {new_90_right}s | 180° = {new_180}s | Thẳng = {new_straight}s")
 
-    st.caption(f"📌 Cấu hình hiện tại: 90° = {turn_cfg.get('90_DEG')}s | 180° = {turn_cfg.get('180_DEG')}s")
+    st.caption(f"📌 Cấu hình hiện tại: 90° Trái = {turn_cfg.get('90_DEG_LEFT')}s | 90° Phải = {turn_cfg.get('90_DEG_RIGHT')}s | 180° = {turn_cfg.get('180_DEG')}s")
 
 if active_tab == "tab1":
     # ──────────────────────────────────────────────
