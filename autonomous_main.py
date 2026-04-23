@@ -18,7 +18,8 @@ import shutil
 BASE_SPEED          = 120
 TARGET_RIGHT        = 300
 TARGET_LEFT         = 20
-SCAN_Y_RIGHT        = 0.65     # Fraction of frame height to scan at
+SCAN_Y_NORMAL       = 0.75     # Tỷ lệ quét đường thẳng (nhìn gần)
+SCAN_Y_INTERSECTION = 0.65     # Tỷ lệ quét ở ngã tư (nhìn xa)
 SCAN_SEARCH_UP_ROWS = 35       # How many rows upward to search for lane edge
 STEERING_GAIN       = 3        # Proportional gain
 
@@ -28,9 +29,9 @@ STEERING_GAIN       = 3        # Proportional gain
 # Helper Functions (Standalone)
 # ============================================================
 
-def _find_right_lane(edges, last_x=-1):
+def _find_right_lane(edges, scan_y_ratio=0.75, last_x=-1):
     h, w = edges.shape
-    target_y = int(h * SCAN_Y_RIGHT)
+    target_y = int(h * scan_y_ratio)
     
     # 1. Tìm điểm gốc ở đáy ảnh (ưu tiên mép TRONG - gần tâm nhất)
     # Quét từ 45% chiều rộng (lấn sang trái một chút) đến 90%
@@ -82,9 +83,9 @@ def _find_right_lane(edges, last_x=-1):
     best_point = min(lane_points, key=lambda p: abs(p[1] - target_y))
     return best_point[0], target_y
 
-def _find_left_lane(edges, last_x=-1):
+def _find_left_lane(edges, scan_y_ratio=0.75, last_x=-1):
     h, w = edges.shape
-    target_y = int(h * SCAN_Y_RIGHT)
+    target_y = int(h * scan_y_ratio)
     
     # Quét từ 10% đến 55% (lấn sang phải một chút)
     start_search = int(w * 0.1)
@@ -161,7 +162,7 @@ def _draw_orientation_mark(frame, steering):
     cv2.line(frame, (cx, base_y - bar_h // 2), (cx, base_y + bar_h // 2), (200, 200, 200), 1)
     cv2.putText(frame, f"Steer: {int(steering):+d}", (cx - w // 4, base_y - bar_h // 2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1)
 
-def follow_lane_frame(frame, last_steering, pos_history, max_history=5):
+def follow_lane_frame(frame, last_steering, pos_history, scan_y_ratio=0.75, max_history=5):
     img_small = cv2.resize(frame, (320, 240))
     
     # Preprocessing
@@ -173,7 +174,7 @@ def follow_lane_frame(frame, last_steering, pos_history, max_history=5):
     
     _draw_edge_overlay(img_small, edges)
     
-    right_x_raw, y_lane = _find_right_lane(edges, -1)
+    right_x_raw, y_lane = _find_right_lane(edges, scan_y_ratio, -1)
     
     # 1. Quản lý trạng thái làn và Lọc nhiễu vị trí
     if right_x_raw != -1:
@@ -186,7 +187,7 @@ def follow_lane_frame(frame, last_steering, pos_history, max_history=5):
         memory_used = False
     else:
         # Nếu mất làn phải, thử tìm làn trái
-        left_x_raw, y_lane = _find_left_lane(edges, -1)
+        left_x_raw, y_lane = _find_left_lane(edges, scan_y_ratio, -1)
         if left_x_raw != -1:
             active_lane = "left"
             if len(pos_history) > 0 and pos_history[0] >= 160: # Chuyển từ phải sang trái -> Xóa lịch sử cũ
@@ -294,7 +295,7 @@ class AutonomousCar:
         self.snapshot_dir = "data/sign_snapshots"
         os.makedirs(self.snapshot_dir, exist_ok=True)
         self.sign_snapshots = []
-        self.last_saved_sign_time = {}
+        self.saved_signs = set()
 
     @property
     def rfid(self):
@@ -348,19 +349,14 @@ class AutonomousCar:
                             frame_hits.add(sign_type)
                             self.sign_counts[sign_type] = min(5, self.sign_counts.get(sign_type, 0) + 1)
                             
-                            # Log every detection for debugging
-                            if conf >= 0.5:
-                                self._log(f"[VISION-DEBUG] Seen {sign_type.upper()} ({conf*100:.1f}%) count={self.sign_counts[sign_type]}")
-                            
                             # Only confirm if we have enough hits
                             if self.sign_counts[sign_type] >= self.CONFIRM_THRESHOLD:
                                 current_results.append((sign_type, conf, bbox))
                                 
-                                # Snapshot saving logic (safe to do in background)
-                                now = time.time()
-                                if now - self.last_saved_sign_time.get(sign_type, 0) > 4.0:
-                                    self.last_saved_sign_time[sign_type] = now
-                                    filename = f"{sign_type}_{int(now)}.jpg"
+                                # Lưu snapshot: chỉ lưu 1 ảnh xuất hiện đầu tiên
+                                if sign_type not in self.saved_signs:
+                                    self.saved_signs.add(sign_type)
+                                    filename = f"{sign_type}_{int(time.time())}.jpg"
                                     filepath = os.path.join(self.snapshot_dir, filename)
                                     
                                     snap_frame = raw_frame.copy()
@@ -370,7 +366,7 @@ class AutonomousCar:
                                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
                                     cv2.imwrite(filepath, snap_frame)
                                     self.sign_snapshots.append(filepath)
-                                    if len(self.sign_snapshots) > 10: self.sign_snapshots.pop(0)
+                                    if len(self.sign_snapshots) > 5: self.sign_snapshots.pop(0)
 
                 # Decay counts for signs NOT seen in this frame
                 for st in self.sign_counts:
@@ -426,9 +422,6 @@ class AutonomousCar:
                 uid = self._latest_uid
                 self._latest_uid = None
         
-        if uid:
-            print(f"📡 [SCANNER] Found UID: {uid}")
-            self._log(f"[RFID-SCAN] UID scanned: {uid}")
         if uid in self.rfid_map:
             detected = self.rfid_map[uid]
             if detected != self.current_node:
@@ -536,9 +529,12 @@ class AutonomousCar:
             motor.move_straight()
             return
 
+        # Xác định tỷ lệ quét dựa trên trạng thái (ngã tư hay đường thẳng)
+        current_scan_y = SCAN_Y_INTERSECTION if self.blind_run_end_time is not None else SCAN_Y_NORMAL
+
         # Gọi thuật toán standalone cải tiến
         right_x, y_right, steering, memory_used, mode, display_frame, edges = \
-            follow_lane_frame(raw_frame, self.last_steering, self.pos_history)
+            follow_lane_frame(raw_frame, self.last_steering, self.pos_history, scan_y_ratio=current_scan_y)
 
         self.last_steering = steering
 
@@ -620,5 +616,8 @@ class AutonomousCar:
 
     def _log(self, msg: str):
         entry = f"[{time.strftime('%H:%M:%S')}] {msg}"
-        self.log_history.append(entry)
-        if len(self.log_history) > 200: self.log_history = self.log_history[-200:]
+        if "[BLIND-RUN] Estimated arrival" in msg and self.log_history and "[BLIND-RUN] Estimated arrival" in self.log_history[-1]:
+            self.log_history[-1] = entry
+        else:
+            self.log_history.append(entry)
+            if len(self.log_history) > 200: self.log_history = self.log_history[-200:]
