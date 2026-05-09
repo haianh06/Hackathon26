@@ -23,14 +23,24 @@ The project is organized into modular layers for perception, navigation, and har
 Requires Raspberry Pi OS (Pi 4 or Pi 5). Enable SPI via `raspi-config`.
 
 ### 2. Installation
-```bash
-# System dependencies
-sudo apt update && sudo apt install -y python3-lgpio python3-spidev
 
-# Environment setup
-python3 -m venv venv --system-site-packages
-source venv/bin/activate
-pip install numpy streamlit picamera2 opencv-python networkx plotly
+First, install **uv** (a fast Python package manager):
+```bash
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+```
+
+Install system dependencies and setup the project:
+```bash
+# System dependencies (LGPIO, SPI, and Build headers)
+sudo apt update && sudo apt install -y python3-lgpio python3-spidev libcap-dev
+
+# Environment setup and dependencies
+uv venv
+source .venv/bin/activate
+source ~/.local/bin/env
+uv pip install numpy streamlit picamera2 opencv-python networkx plotly
 ```
 
 ### 3. Launching the System
