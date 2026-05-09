@@ -1,0 +1,34 @@
+{
+    "mission_start_time": "Sat May  9 15:45:42 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "15:45:42",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "15:45:42",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại START"
+        },
+        {
+            "time": "15:46:25",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "15:46:25",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "15:46:49",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": []
+}

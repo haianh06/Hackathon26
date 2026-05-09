@@ -37,7 +37,7 @@ Install system dependencies and setup the project:
 sudo apt update && sudo apt install -y python3-lgpio python3-spidev libcap-dev
 
 # Environment setup and dependencies
-uv venv
+uv venv --system-site-packages
 source .venv/bin/activate
 source ~/.local/bin/env
 uv pip install numpy streamlit picamera2 opencv-python networkx plotly
@@ -55,7 +55,7 @@ streamlit run app.py
 
 - **Advanced Lane Perception**: Dual-mode lane following (Basic Scan or Sliding Window with Polynomial Fitting).
 - **RFID Virtual Positioning**: Real-time position syncing between the physical robot and the virtual map.
-- **Smart Pathfinding**: Support for sequential waypoints and multi-stop optimized tours.
+- **Mission 2026**: Fully autonomous round-trip mission (START → P1 → P2 → START) with automatic JSON logging of traffic signs and arrival timestamps.
 - **Unified Control**: Real-time camera streaming, manual WASD overrides, and dynamic parameter tuning (Timings/Perspective) from a single Web UI.
 
 ---

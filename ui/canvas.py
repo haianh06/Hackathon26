@@ -25,6 +25,7 @@ def create_parking_lot_map(
     visit_order=None,
     segment_breaks=None,
     initial_heading=None,
+    preview_point=None,
 ):
     """
     Render the interactive parking lot map.
@@ -47,7 +48,7 @@ def create_parking_lot_map(
     fig = go.Figure()
 
     # Add hidden scatter grid across plotting area [-5, 105] to capture ANY click
-    grid_x, grid_y = np.meshgrid(np.arange(-5, 105, 5), np.arange(-5, 105, 5))
+    grid_x, grid_y = np.meshgrid(np.arange(-5, 105, 2), np.arange(-5, 105, 2))
     fig.add_trace(go.Scatter(
         x=grid_x.flatten(),
         y=grid_y.flatten(),
@@ -173,17 +174,29 @@ def create_parking_lot_map(
         symbols.append(symbol)
 
         # Labels & Hover text
-        label = data.get('label', '') or node
+        label = data.get('label') or node
         rank_txt = f"<br>🔢 Ghé thăm #: {visit_rank[node]}" if node in visit_rank else ""
         role_txt = ""
         if node == start_node:
             role_txt = "<br>🟢 Xuất phát / Về đích"
         elif node == end_node and not waypoints:
             role_txt = "<br>🔴 Điểm đến"
-        node_text.append(f"<b>{label}</b><br>ID: {node}{rank_txt}{role_txt}")
+        node_text.append(f"<b>{label}</b>{rank_txt}{role_txt}")
         # Only show labels on map if they are actual names (not just IDs) or if they are important nodes
         is_important = node in [start_node, end_node, sim_node] or node in waypoints or node in current_path
         map_labels.append(label if (data.get('label') or is_important) else "")
+
+    # ── Preview Point ───────────────────────────────────────────────────
+    if preview_point:
+        px, py = preview_point
+        fig.add_trace(go.Scatter(
+            x=[px], y=[py],
+            mode='markers',
+            marker=dict(size=18, color='magenta', symbol='cross', line=dict(width=2, color='white')),
+            name="New Node Preview",
+            hoverinfo='text',
+            hovertext="New Node Position"
+        ))
 
     fig.add_trace(go.Scatter(
         x=node_x, y=node_y, mode='markers+text',

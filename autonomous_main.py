@@ -11,6 +11,7 @@ from hardware.camera import camera_manager
 import math
 import os
 import shutil
+import json
 
 # ============================================================
 # Configuration — Lane Following (Standalone)
@@ -238,9 +239,10 @@ class CarState(Enum):
     MOVING = auto()
     TURNING = auto()
     ARRIVED = auto()
+    WAITING = auto()
 
 class AutonomousCar:
-    def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None, initial_heading=0, speed_px_per_sec=65.0, lane_mode="basic", perspective_src=None):
+    def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None, initial_heading=0, speed_px_per_sec=65.0, pause_nodes=None):
         self.nav = NavEngine(graph, turn_table)
         self.target_node = target_node
         self.rfid_map = rfid_map
@@ -248,6 +250,9 @@ class AutonomousCar:
         self.predefined_path = predefined_path
         self.initial_heading = initial_heading
         self.speed_px_per_sec = speed_px_per_sec
+        self.waypoints = predefined_path if predefined_path else []
+        self.pause_nodes = pause_nodes if pause_nodes else []
+        self.visited_waypoints = []
 
         self.prev_node = None
         self.current_node = predefined_path[0] if predefined_path else None
@@ -285,17 +290,39 @@ class AutonomousCar:
         self.last_sign_detect_time = 0.0
         self.sign_detect_interval = 0.1 # High frequency background scan
         self.last_detected_signs = []
+        self.sign_counts = {} # Track detection frequency for filtering
+        self.CONFIRM_THRESHOLD = 3 # Number of frames to confirm a sign
         self._sign_lock = threading.Lock()
         self._sign_thread = None
-        
-        # Temporal Buffer: {sign_type: hit_count}
-        self.sign_counts = {'straight': 0, 'left': 0, 'right': 0, 'parking': 0}
-        self.CONFIRM_THRESHOLD = 3 # Consecutive hits to confirm
         
         self.snapshot_dir = "data/sign_snapshots"
         os.makedirs(self.snapshot_dir, exist_ok=True)
         self.sign_snapshots = []
         self.saved_signs = set()
+        
+        # --- Mission JSON Logging ---
+        self.mission_log_file = f"data/mission_{int(time.time())}.json"
+        self.mission_data = {
+            "mission_start_time": time.ctime(),
+            "target_nodes": [str(target_node)],
+            "events": [],
+            "signs_detected": []
+        }
+        self._save_mission_json()
+
+    def _save_mission_json(self):
+        try:
+            with open(self.mission_log_file, "w", encoding="utf-8") as f:
+                json.dump(self.mission_data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving mission JSON: {e}")
+
+    def _log_event(self, event_type, details):
+        timestamp = time.strftime('%H:%M:%S')
+        entry = {"time": timestamp, "type": event_type, "details": details}
+        self.mission_data["events"].append(entry)
+        self._save_mission_json()
+        self._log(f"[{event_type}] {details}")
 
     @property
     def rfid(self):
@@ -356,7 +383,8 @@ class AutonomousCar:
                                 # Lưu snapshot: chỉ lưu 1 ảnh xuất hiện đầu tiên
                                 if sign_type not in self.saved_signs:
                                     self.saved_signs.add(sign_type)
-                                    filename = f"{sign_type}_{int(time.time())}.jpg"
+                                    timestamp_val = int(time.time())
+                                    filename = f"{sign_type}_{timestamp_val}.jpg"
                                     filepath = os.path.join(self.snapshot_dir, filename)
                                     
                                     snap_frame = raw_frame.copy()
@@ -365,8 +393,20 @@ class AutonomousCar:
                                     cv2.putText(snap_frame, f"{sign_type} CONFIRMED", (rx, max(25, ry-10)),
                                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
                                     cv2.imwrite(filepath, snap_frame)
+                                    
+                                    # Log to JSON
+                                    sign_entry = {
+                                        "type": sign_type,
+                                        "confidence": float(conf),
+                                        "image_path": filepath,
+                                        "timestamp": time.ctime()
+                                    }
+                                    self.mission_data["signs_detected"].append(sign_entry)
+                                    self._save_mission_json()
+                                    
                                     self.sign_snapshots.append(filepath)
                                     if len(self.sign_snapshots) > 5: self.sign_snapshots.pop(0)
+                                    self._log(f"📸 Saved sign image: {filename}")
 
                 # Decay counts for signs NOT seen in this frame
                 for st in self.sign_counts:
@@ -384,7 +424,7 @@ class AutonomousCar:
 
     def execute(self):
         self.is_active = True
-        self._log("[START] Mission started. Target: " + str(self.target_node))
+        self._log_event("START", f"Hành trình bắt đầu. Điểm đích cuối: {self._get_node_label(self.target_node)}")
         
         # Start RFID background thread
         self._rfid_thread = threading.Thread(target=self._rfid_background_loop, daemon=True)
@@ -402,9 +442,9 @@ class AutonomousCar:
             motor.stop()
             self.is_active = False
             if self.state == CarState.ARRIVED:
-                self._log("[ARRIVED] Đã tới đích: " + str(self.target_node))
+                self._log_event("ARRIVED", f"Đã hoàn thành toàn bộ hành trình tại: {self._get_node_label(self.target_node)}")
             else:
-                self._log("[STOPPED] Mission dừng sớm.")
+                self._log_event("STOPPED", "Mission dừng sớm hoặc bị hủy bởi người dùng.")
         except Exception as e:
             self._log(f"[ERROR] {e}")
             print(f"AutonomousCar Thread Error: {e}")
@@ -428,14 +468,23 @@ class AutonomousCar:
                 if self.predefined_path and detected in self.predefined_path:
                     try:
                         idx = self.predefined_path.index(detected)
-                        self.prev_node = self.predefined_path[idx-1] if idx > 0 else self.current_node
+                        new_prev = self.predefined_path[idx-1] if idx > 0 else None
+                        self.prev_node = new_prev if new_prev != detected else None
                     except ValueError:
-                        self.prev_node = self.current_node
+                        self.prev_node = None
                 else:
-                    self.prev_node = self.current_node
+                    self.prev_node = None
+
                 self.current_node = detected
-                self._log(f"[RFID] Node detected: {self._get_node_label(detected)}")
-                self.state = CarState.PLANNING
+                if detected in self.pause_nodes and detected not in self.visited_waypoints:
+                    self.visited_waypoints.append(detected)
+                    self._log_event("ARRIVAL_POI", f"Đã đến điểm mốc: {self._get_node_label(detected)}")
+                    self.state = CarState.WAITING
+                    motor.stop()
+                    self._log("[WAIT] Đang đợi xác nhận của người dùng để tiếp tục...")
+                else:
+                    self._log_event("RFID", f"Phát hiện Node: {self._get_node_label(detected)}")
+                self.state = CarState.PLANNING if self.state != CarState.WAITING else CarState.WAITING
 
         if self.state == CarState.PLANNING:
             # --- 1. Sincronize predefined path if available ---
@@ -465,7 +514,17 @@ class AutonomousCar:
 
             if path and len(path) > 1:
                 self.next_node = path[1]
-                self._log(f"[NAV] {self._get_node_label(self.current_node)} → {self._get_node_label(self.next_node)}")
+                # Log angles for better synchronization debugging
+                if self.prev_node and self.prev_node in self.nav.nodes:
+                    dx1 = self.nav.nodes[self.current_node]['x'] - self.nav.nodes[self.prev_node]['x']
+                    dy1 = self.nav.nodes[self.current_node]['y'] - self.nav.nodes[self.prev_node]['y']
+                    a1 = math.degrees(math.atan2(dy1, dx1))
+                    dx2 = self.nav.nodes[self.next_node]['x'] - self.nav.nodes[self.current_node]['x']
+                    dy2 = self.nav.nodes[self.next_node]['y'] - self.nav.nodes[self.current_node]['y']
+                    a2 = math.degrees(math.atan2(dy2, dx2))
+                    self._log(f"[NAV] {self._get_node_label(self.current_node)} → {self._get_node_label(self.next_node)} (H: {a1:.0f}° -> {a2:.0f}°)")
+                else:
+                    self._log(f"[NAV] {self._get_node_label(self.current_node)} → {self._get_node_label(self.next_node)}")
                 remaining_path = path[1:]
                 if all(str(node).startswith("V_") or str(node).startswith("W_") for node in remaining_path):
                     try:
@@ -501,13 +560,13 @@ class AutonomousCar:
                 self.state = CarState.MOVING
 
         elif self.state == CarState.TURNING:
-            if self.prev_node is None and self.current_node and self.next_node:
+            if (self.prev_node is None or self.prev_node == self.current_node) and self.current_node and self.next_node:
                 action = self.nav.get_initial_action(self.current_node, self.next_node, self.initial_heading)
-                self._log(f"[INIT-TURN] Hướng: {self.initial_heading}° | Hành động: {action}")
+                self._log(f"[INIT-TURN] Hướng ban đầu: {self.initial_heading}° | Mục tiêu: {self._get_node_label(self.next_node)} | Hành động: {action}")
             elif self.prev_node and self.current_node and self.next_node:
                 action = self.nav.get_action(self.prev_node, self.current_node, self.next_node)
             else: action = "STRAIGHT"
-            self._log(f"[TURN] Hành động: {action}")
+            self._log_event("TURN_EXEC", f"Lệnh điều hướng: {action} tại {self._get_node_label(self.current_node)}")
             self.execute_motor_action(action)
             self.state = CarState.MOVING
 
@@ -526,6 +585,16 @@ class AutonomousCar:
                         self._last_blind_log = time.time()
                     self.follow_lane()
             else: self.follow_lane()
+
+        elif self.state == CarState.WAITING:
+            motor.stop()
+            # Stays in WAITING until resume_mission() is called
+            pass
+
+    def resume_mission(self):
+        if self.state == CarState.WAITING:
+            self._log_event("RESUME", "Người dùng xác nhận. Tiếp tục lộ trình.")
+            self.state = CarState.PLANNING
 
     def follow_lane(self):
         raw_frame = camera_manager.get_frame()
@@ -578,11 +647,17 @@ class AutonomousCar:
         t_90_left = self.turn_config.get("90_DEG_LEFT", self.turn_config.get("90_DEG", 1.2))
         t_180 = self.turn_config.get("180_DEG", 2.4)
 
+        # Immediate turn for START node
+        is_start = self._get_node_label(self.current_node) == "START"
+        eff_straight = 0 if is_start else t_straight
+
         if action == "RIGHT":
-            motor.move_straight(); time.sleep(t_straight)
+            if eff_straight > 0:
+                motor.move_straight(); time.sleep(eff_straight)
             motor.turn_right(); time.sleep(t_90_right)
         elif action == "LEFT":
-            motor.move_straight(); time.sleep(t_straight)
+            if eff_straight > 0:
+                motor.move_straight(); time.sleep(eff_straight)
             motor.turn_left(); time.sleep(t_90_left)
         elif action =="TURN_AROUND":
             motor.turn_right(); time.sleep(t_180)
@@ -596,10 +671,10 @@ class AutonomousCar:
 
     def _get_node_label(self, node_id):
         if not node_id: return "None"
-        if node_id in self.nav.graph.get('nodes', {}):
-            lbl = self.nav.graph['nodes'][node_id].get('label', '')
-            return f"{lbl} [{node_id}]" if lbl else f"[{node_id}]"
-        return f"[{node_id}]"
+        if hasattr(self, 'nav') and node_id in self.nav.nodes:
+            lbl = self.nav.nodes[node_id].get('label', '')
+            return lbl if lbl else node_id
+        return node_id
 
     def stop_system(self):
         """Safely stop all background threads and release resources."""
