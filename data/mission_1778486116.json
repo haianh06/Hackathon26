@@ -1,0 +1,176 @@
+{
+    "mission_start_time": "Mon May 11 14:55:16 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "14:55:16",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "14:55:16",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "14:55:48",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "14:55:48",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "14:56:02",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "14:56:02",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "14:56:08",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 24.5cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:56:11",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 1: Đối đầu (vật tĩnh/xe khác dừng). Đang re-plan..."
+        },
+        {
+            "time": "14:56:33",
+            "type": "RFID",
+            "details": "Phát hiện Node: C"
+        },
+        {
+            "time": "14:56:33",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại C"
+        },
+        {
+            "time": "14:56:45",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: F"
+        },
+        {
+            "time": "14:56:52",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:56:52",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại F"
+        },
+        {
+            "time": "14:57:06",
+            "type": "RFID",
+            "details": "Phát hiện Node: E"
+        },
+        {
+            "time": "14:57:06",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại E"
+        },
+        {
+            "time": "14:57:18",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: G"
+        },
+        {
+            "time": "14:57:20",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:57:20",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: TURN_AROUND tại G"
+        },
+        {
+            "time": "14:57:30",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 24.5cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:57:36",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 1: Đối đầu (vật tĩnh/xe khác dừng). Đang re-plan..."
+        },
+        {
+            "time": "14:57:50",
+            "type": "RFID",
+            "details": "Phát hiện Node: F"
+        },
+        {
+            "time": "14:57:50",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại F"
+        },
+        {
+            "time": "14:58:00",
+            "type": "RFID",
+            "details": "Phát hiện Node: C"
+        },
+        {
+            "time": "14:58:00",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại C"
+        },
+        {
+            "time": "14:58:06",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 11.5cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:58:09",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:58:17",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 21.5cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:58:20",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:58:25",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 16.7cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:58:28",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:58:28",
+            "type": "RFID",
+            "details": "Phát hiện Node: START"
+        },
+        {
+            "time": "14:58:28",
+            "type": "ARRIVED",
+            "details": "Đã hoàn thành toàn bộ hành trình tại: START"
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "left",
+            "confidence": 0.4180934429168701,
+            "image_path": "data/sign_snapshots/left_1778486298.jpg",
+            "timestamp": "Mon May 11 14:58:18 2026"
+        }
+    ]
+}

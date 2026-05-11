@@ -1,0 +1,81 @@
+{
+    "mission_start_time": "Mon May 11 14:18:18 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "14:18:18",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "14:18:18",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "14:18:49",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "14:18:49",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "14:19:02",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "14:19:02",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "14:19:08",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 24.3cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:19:11",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 1: Đối đầu (vật tĩnh/xe khác dừng). Đang re-plan..."
+        },
+        {
+            "time": "14:19:15",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "14:19:16",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "14:19:38",
+            "type": "RFID",
+            "details": "Phát hiện Node: C"
+        },
+        {
+            "time": "14:19:38",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại C"
+        },
+        {
+            "time": "14:19:45",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "straight",
+            "confidence": 0.6702962517738342,
+            "image_path": "data/sign_snapshots/straight_1778483947.jpg",
+            "timestamp": "Mon May 11 14:19:07 2026"
+        }
+    ]
+}

@@ -24,6 +24,7 @@ class CameraManager:
         if self._initialized:
             return
         self.frame = None
+        self.resized_frame = None
         self.running = False
         self.lock = threading.Lock()
         self.thread = None
@@ -51,7 +52,6 @@ class CameraManager:
                     print("CameraManager: Initializing Picamera2...")
                     self.picam2 = Picamera2()
                     
-                    # Align with HD standalone script: dynamic scaling to preserve wide FOV
                     sensor_res = self.picam2.sensor_resolution
                     scale = 800 / sensor_res[0] if sensor_res[0] > 800 else 1.0
                     target_size = (int(sensor_res[0] * scale), int(sensor_res[1] * scale))
@@ -61,7 +61,6 @@ class CameraManager:
                     )
                     self.picam2.configure(config)
                     try:
-                        # Only set LensPosition if supported by hardware (e.g. V3 camera)
                         if "LensPosition" in self.picam2.controls:
                             self.picam2.set_controls({"LensPosition": 0.5})
                     except Exception:
@@ -77,7 +76,6 @@ class CameraManager:
                             self.picam2.close()
                         except: pass
                         self.picam2 = None
-                    # Wait longer on failure to allow hardware to release
                     time.sleep(2.0)
 
             # 2. Fallback to OpenCV
@@ -87,8 +85,8 @@ class CameraManager:
                 for idx in indices:
                     c = cv2.VideoCapture(idx, cv2.CAP_V4L2)
                     if c.isOpened():
-                        c.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-                        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+                        c.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                         ret, _ = c.read()
                         if ret:
                             self.cap = c
@@ -97,7 +95,6 @@ class CameraManager:
                         c.release()
                 
                 if not self.cap:
-                    # Last resort
                     c = cv2.VideoCapture(0)
                     if c.isOpened():
                         self.cap = c
@@ -108,28 +105,29 @@ class CameraManager:
 
             # 3. Capture Loop
             try:
+                raw_frame = None
                 if self.picam2:
-                    frame = self.picam2.capture_array()
-                    with self.lock:
-                        # picamera2 returns BGR natively on this system. OpenCV cap.read() also returns BGR.
-                        # Standardizing all camera manager output to BGR.
-                        self.frame = frame
+                    raw_frame = self.picam2.capture_array()
                 elif self.cap:
                     ret, frame = self.cap.read()
                     if ret:
-                        with self.lock:
-                            # OpenCV reads BGR natively.
-                            self.frame = frame
+                        raw_frame = frame
                     else:
                         print("⚠️ CameraManager: OpenCV frame lost. Resetting...")
                         self.cap.release()
                         self.cap = None
                         time.sleep(1.0)
                 
+                if raw_frame is not None:
+                    # Pre-resize once for all consumers (e.g. 320x240)
+                    small = cv2.resize(raw_frame, (320, 240))
+                    with self.lock:
+                        self.frame = raw_frame
+                        self.resized_frame = small
+                
                 time.sleep(0.01)
             except Exception as e:
                 print(f"⚠️ CameraManager capture error: {e}")
-                # If Picamera2 crashes, we might need to reset everything
                 if self.picam2:
                     try: 
                         self.picam2.stop()
@@ -138,7 +136,6 @@ class CameraManager:
                     self.picam2 = None
                 time.sleep(1.0)
 
-        # Cleanup on exit
         print("CameraManager: Shutting down...")
         self._cleanup()
 
@@ -154,11 +151,20 @@ class CameraManager:
             except: pass
             self.cap = None
 
-    def get_frame(self):
+    def get_frame(self, copy=True):
         with self.lock:
             if self.frame is not None:
-                return self.frame.copy()
+                return self.frame.copy() if copy else self.frame
             return None
+
+    def get_frame_resized(self, size=(320, 240), copy=True):
+        """Returns a cached resized frame if size matches, else resizes on demand."""
+        with self.lock:
+            if self.frame is None:
+                return None
+            if size == (320, 240) and self.resized_frame is not None:
+                return self.resized_frame.copy() if copy else self.resized_frame
+            return cv2.resize(self.frame, size)
 
     def stop(self):
         with self.lock:

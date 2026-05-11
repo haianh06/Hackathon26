@@ -14,7 +14,7 @@ import shutil
 import json
 
 # ============================================================
-# Configuration — Lane Following (Standalone)
+# [SYSTEM SETTINGS] Configuration — Lane Following & Sonar
 # ============================================================
 BASE_SPEED          = 120
 TARGET_RIGHT        = 300
@@ -23,6 +23,12 @@ SCAN_Y_NORMAL       = 0.75     # Tỷ lệ quét đường thẳng (nhìn gần)
 SCAN_Y_INTERSECTION = 0.65     # Tỷ lệ quét ở ngã tư (nhìn xa)
 SCAN_SEARCH_UP_ROWS = 35       # How many rows upward to search for lane edge
 STEERING_GAIN       = 3        # Proportional gain
+
+# Sonar Obstacle Avoidance Settings
+SONAR_TRIGGER       = 23
+SONAR_ECHO          = 24
+SONAR_THRESHOLD     = 20      # Khoảng cách an toàn (cm)
+OBSTACLE_WAIT_TIME  = 3.0      # Thời gian chờ quan sát (giây)
 
 
 
@@ -163,8 +169,11 @@ def _draw_orientation_mark(frame, steering):
     cv2.line(frame, (cx, base_y - bar_h // 2), (cx, base_y + bar_h // 2), (200, 200, 200), 1)
     cv2.putText(frame, f"Steer: {int(steering):+d}", (cx - w // 4, base_y - bar_h // 2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1)
 
-def follow_lane_frame(frame, last_steering, pos_history, scan_y_ratio=0.75, max_history=5):
-    img_small = cv2.resize(frame, (320, 240))
+def follow_lane_frame(frame, last_steering, pos_history, scan_y_ratio=0.75, max_history=5, is_already_small=False):
+    if is_already_small:
+        img_small = frame
+    else:
+        img_small = cv2.resize(frame, (320, 240))
     
     # Preprocessing
     gray = cv2.cvtColor(img_small, cv2.COLOR_BGR2GRAY)
@@ -240,15 +249,16 @@ class CarState(Enum):
     TURNING = auto()
     ARRIVED = auto()
     WAITING = auto()
+    OBSTACLE_STOP = auto()
 
 class AutonomousCar:
-    def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None, initial_heading=0, speed_px_per_sec=65.0, pause_nodes=None):
+    def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None, initial_heading=0, speed_px_per_sec=65.0, pause_nodes=None, sonar_threshold=25.0):
         self.nav = NavEngine(graph, turn_table)
         self.target_node = target_node
         self.rfid_map = rfid_map
         self.turn_config = turn_config
         self.predefined_path = predefined_path
-        self.initial_heading = initial_heading
+        self.current_heading = initial_heading
         self.speed_px_per_sec = speed_px_per_sec
         self.waypoints = predefined_path if predefined_path else []
         self.pause_nodes = pause_nodes if pause_nodes else []
@@ -269,10 +279,16 @@ class AutonomousCar:
         self.blind_run_target_node = None
         self._last_blind_log = 0
 
+        # Sonar & Obstacle state
+        self.sonar_distance = 999.0
+        self._sonar_lock = threading.Lock()
+        self._sonar_thread = None
+        self.obstacle_detected_time = 0
+        self.obstacle_history = [] # Lưu lịch sử khoảng cách trong 3s
+        self.sonar_threshold = sonar_threshold
+
         # RFID Threading state
         self._latest_uid = None
-        self._rfid_lock = threading.Lock()
-        self._rfid_thread = None
         self._rfid_lock = threading.Lock()
         self._rfid_thread = None
 
@@ -330,6 +346,52 @@ class AutonomousCar:
             self._rfid = RFIDReader()
         return self._rfid
 
+    def _sonar_background_loop(self):
+        """Dedicated loop for HC-SR04 sonar measurements."""
+        from hardware.gpio_handle import gpio_open
+        import lgpio
+        
+        self._log("[SONAR] Background reader thread started.")
+        h = gpio_open()
+        try:
+            lgpio.gpio_claim_output(h, SONAR_TRIGGER)
+            lgpio.gpio_claim_input(h, SONAR_ECHO)
+            lgpio.gpio_write(h, SONAR_TRIGGER, 0)
+        except Exception as e:
+            self._log(f"[SONAR ERROR] Init failed: {e}")
+            return
+            
+        while self.is_active:
+            try:
+                lgpio.gpio_write(h, SONAR_TRIGGER, 1)
+                time.sleep(0.00001)
+                lgpio.gpio_write(h, SONAR_TRIGGER, 0)
+                
+                start_timeout = time.time()
+                pulse_start = start_timeout
+                while lgpio.gpio_read(h, SONAR_ECHO) == 0:
+                    pulse_start = time.time()
+                    if pulse_start - start_timeout > 0.02: break # 20ms timeout
+                
+                end_timeout = time.time()
+                pulse_end = end_timeout
+                while lgpio.gpio_read(h, SONAR_ECHO) == 1:
+                    pulse_end = time.time()
+                    if pulse_end - end_timeout > 0.02: break # 20ms timeout
+                
+                duration = pulse_end - pulse_start
+                if 0 < duration < 0.03: # Filter out unrealistic values
+                    dist = duration * 17150
+                    with self._sonar_lock:
+                        if dist > 0.1:
+                            # Simple low-pass filter
+                            self.sonar_distance = 0.7 * self.sonar_distance + 0.3 * dist if self.sonar_distance != 999.0 else dist
+            except Exception:
+                pass
+            
+            time.sleep(0.06) # ~15Hz is plenty for sonar
+        self._log("[SONAR] Background reader thread stopped.")
+
     def _rfid_background_loop(self):
         """Dedicated high-frequency RFID scanning loop running in a background thread."""
         self._log("[RFID] Background reader thread started.")
@@ -358,7 +420,8 @@ class AutonomousCar:
             if not self.has_sign_detection:
                 break
                 
-            raw_frame = camera_manager.get_frame()
+            # Get frame reference without copy to save memory
+            raw_frame = camera_manager.get_frame(copy=False)
             if raw_frame is not None:
                 # Convert to RGB once for detector
                 rgb_frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
@@ -371,22 +434,20 @@ class AutonomousCar:
                 if detected:
                     for roi, bbox in detected:
                         sign_type, conf = self.sign_classifier.classify(roi)
-                        # Lower threshold for single frame (0.4) because we have the temporal buffer
                         if conf >= 0.4:
                             frame_hits.add(sign_type)
                             self.sign_counts[sign_type] = min(5, self.sign_counts.get(sign_type, 0) + 1)
                             
-                            # Only confirm if we have enough hits
                             if self.sign_counts[sign_type] >= self.CONFIRM_THRESHOLD:
                                 current_results.append((sign_type, conf, bbox))
                                 
-                                # Lưu snapshot: chỉ lưu 1 ảnh xuất hiện đầu tiên
                                 if sign_type not in self.saved_signs:
                                     self.saved_signs.add(sign_type)
                                     timestamp_val = int(time.time())
                                     filename = f"{sign_type}_{timestamp_val}.jpg"
                                     filepath = os.path.join(self.snapshot_dir, filename)
                                     
+                                    # Copy only when saving
                                     snap_frame = raw_frame.copy()
                                     rx, ry, rw, rh = bbox
                                     cv2.rectangle(snap_frame, (rx, ry), (rx+rw, ry+rh), (0,255,0), 2)
@@ -394,7 +455,6 @@ class AutonomousCar:
                                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
                                     cv2.imwrite(filepath, snap_frame)
                                     
-                                    # Log to JSON
                                     sign_entry = {
                                         "type": sign_type,
                                         "confidence": float(conf),
@@ -408,17 +468,14 @@ class AutonomousCar:
                                     if len(self.sign_snapshots) > 5: self.sign_snapshots.pop(0)
                                     self._log(f"📸 Saved sign image: {filename}")
 
-                # Decay counts for signs NOT seen in this frame
-                for st in self.sign_counts:
+                for st in list(self.sign_counts.keys()):
                     if st not in frame_hits:
                         self.sign_counts[st] = max(0, self.sign_counts[st] - 1)
 
-                # Update shared state
                 with self._sign_lock:
                     self.last_detected_signs = current_results
             
-            # Yield control - no need to thrash CPU if no new frame
-            time.sleep(self.sign_detect_interval)
+            time.sleep(0.2) # 5Hz is enough for sign detection and saves CPU
             
         self._log("[VISION] Sign detection thread stopped.")
 
@@ -434,6 +491,10 @@ class AutonomousCar:
         if self.has_sign_detection:
             self._sign_thread = threading.Thread(target=self._sign_detection_loop, daemon=True)
             self._sign_thread.start()
+            
+        # Start Sonar background thread
+        self._sonar_thread = threading.Thread(target=self._sonar_background_loop, daemon=True)
+        self._sonar_thread.start()
         
         try:
             while self.is_active and self.state != CarState.ARRIVED:
@@ -455,6 +516,19 @@ class AutonomousCar:
             self._log("[STOP] Mission terminated and resources released.")
 
     def update_state(self):
+        # Kiểm tra vật cản trước khi làm bất cứ việc gì nếu đang MOVING hoặc TURNING
+        with self._sonar_lock:
+            curr_dist = self.sonar_distance
+            
+        if self.state in [CarState.MOVING, CarState.TURNING]:
+            if curr_dist < self.sonar_threshold:
+                self._log_event("OBSTACLE", f"Phát hiện vật cản tại {curr_dist:.1f}cm. Dừng quan sát 3s.")
+                motor.stop()
+                self.state = CarState.OBSTACLE_STOP
+                self.obstacle_detected_time = time.time()
+                self.obstacle_history = []
+                return
+
         # Consume UID from background thread
         uid = None
         with self._rfid_lock:
@@ -484,6 +558,14 @@ class AutonomousCar:
                     self._log("[WAIT] Đang đợi xác nhận của người dùng để tiếp tục...")
                 else:
                     self._log_event("RFID", f"Phát hiện Node: {self._get_node_label(detected)}")
+                
+                # Cập nhật hướng dựa trên tọa độ thực tế khi đi qua 2 node
+                if self.prev_node and self.prev_node in self.nav.nodes and detected in self.nav.nodes:
+                    dx = self.nav.nodes[detected]['x'] - self.nav.nodes[self.prev_node]['x']
+                    dy = self.nav.nodes[detected]['y'] - self.nav.nodes[self.prev_node]['y']
+                    self.current_heading = math.degrees(math.atan2(dy, dx))
+                    self._log(f"[NAV] Cập nhật hướng xe: {self.current_heading:.1f}°")
+
                 self.state = CarState.PLANNING if self.state != CarState.WAITING else CarState.WAITING
 
         if self.state == CarState.PLANNING:
@@ -560,9 +642,9 @@ class AutonomousCar:
                 self.state = CarState.MOVING
 
         elif self.state == CarState.TURNING:
-            if (self.prev_node is None or self.prev_node == self.current_node) and self.current_node and self.next_node:
-                action = self.nav.get_initial_action(self.current_node, self.next_node, self.initial_heading)
-                self._log(f"[INIT-TURN] Hướng ban đầu: {self.initial_heading}° | Mục tiêu: {self._get_node_label(self.next_node)} | Hành động: {action}")
+            if (self.prev_node is None or self.prev_node == self.current_node or str(self.prev_node).startswith("RETURNING")) and self.current_node and self.next_node:
+                action = self.nav.get_initial_action(self.current_node, self.next_node, self.current_heading)
+                self._log(f"[INIT-TURN] Hướng hiện tại: {self.current_heading:.1f}° | Mục tiêu: {self._get_node_label(self.next_node)} | Hành động: {action}")
             elif self.prev_node and self.current_node and self.next_node:
                 action = self.nav.get_action(self.prev_node, self.current_node, self.next_node)
             else: action = "STRAIGHT"
@@ -586,10 +668,144 @@ class AutonomousCar:
                     self.follow_lane()
             else: self.follow_lane()
 
+        elif self.state == CarState.OBSTACLE_STOP:
+            motor.stop()
+            now = time.time()
+            elapsed = now - self.obstacle_detected_time
+            
+            # Ghi lại lịch sử khoảng cách
+            with self._sonar_lock:
+                self.obstacle_history.append((now, self.sonar_distance))
+            
+            if elapsed >= OBSTACLE_WAIT_TIME:
+                self.handle_obstacle_resolution()
+        
         elif self.state == CarState.WAITING:
             motor.stop()
             # Stays in WAITING until resume_mission() is called
             pass
+
+    def handle_obstacle_resolution(self):
+        """Phân tích 3 giây dữ liệu sonar để quyết định hành động."""
+        if not self.obstacle_history:
+            self.state = CarState.MOVING # Fallback
+            return
+            
+        # Lấy khoảng cách cuối cùng
+        last_dist = self.obstacle_history[-1][1]
+        first_dist = self.obstacle_history[0][1]
+        
+        # Tính toán xu hướng
+        dists = [d for t, d in self.obstacle_history]
+        max_d = max(dists)
+        min_d = min(dists)
+        diff = max_d - min_d
+        
+        # Kiểm tra kịch bản
+        if last_dist > self.sonar_threshold + 10:
+            # Vật cản đã biến mất
+            if diff > 15:
+                self._log_event("OBSTACLE", "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình.")
+            else:
+                self._log_event("OBSTACLE", "Trường hợp 3: Vật cản nối tiếp (di chuyển dần). Tiếp tục lộ trình.")
+            self.state = CarState.MOVING
+        else:
+            # Vật cản vẫn còn đó
+            if diff < 10:
+                self._log_event("OBSTACLE", "Trường hợp 1: Đối đầu (vật tĩnh/xe khác dừng). Đang re-plan...")
+                self.replan_avoidance()
+            else:
+                # Vẫn đang di chuyển nhưng chưa đủ xa, đợi thêm hoặc tiếp tục quan sát
+                # Ở đây ta ưu tiên an toàn, nếu vẫn dưới ngưỡng thì tiếp tục đợi
+                self._log("[OBSTACLE] Vật cản vẫn ở gần, tiếp tục đợi...")
+                self.obstacle_detected_time = time.time() # Reset wait clock
+                self.obstacle_history = []
+        
+    def check_path_clear(self):
+        """Kiểm tra xem vùng trước mặt có vạch trắng (vùng cấm) không."""
+        small_frame = camera_manager.get_frame_resized((320, 240))
+        if small_frame is None:
+            return False
+            
+        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+        
+        # Ngưỡng trắng tương tự như follow_lane
+        _, white_mask = cv2.threshold(gray, 155, 255, cv2.THRESH_BINARY)
+        
+        # Định nghĩa ROI: Vùng hình chữ nhật phía trước xe
+        # 320x240: x từ 110-210 (giữa), y từ 140-200 (phần thấp phía trước)
+        roi_x, roi_y, roi_w, roi_h = 110, 140, 100, 60
+        roi = white_mask[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w]
+        
+        white_count = cv2.countNonZero(roi)
+        total_pixels = roi_w * roi_h
+        ratio = white_count / total_pixels
+        
+        self._log(f"[VISION-CHECK] Tỷ lệ vạch trắng: {ratio:.2f}")
+        
+        # Nếu tỷ lệ trắng < 10% thì coi như đường trống
+        return ratio < 0.10
+
+    def replan_avoidance(self):
+        """Xử lý xoay 90 độ và quét tìm hướng đi không có vạch trắng."""
+        blocked_u = self.current_node
+        blocked_v = self.next_node
+        
+        # 1. Chặn đường hiện tại trong graph
+        if blocked_u and blocked_v:
+            try:
+                if blocked_u in self.nav.graph and blocked_v in self.nav.graph[blocked_u]:
+                    self.nav.graph[blocked_u][blocked_v] = 99999
+                    self._log(f"[REPLAN] Đã chặn đường {self._get_node_label(blocked_u)} -> {self._get_node_label(blocked_v)}")
+            except Exception as e:
+                self._log(f"[REPLAN ERROR] {e}")
+
+        # 2. Xoay 90 độ và kiểm tra
+        found_clear = False
+        t_90 = self.turn_config.get("90_DEG_RIGHT", 1.2)
+        
+        for i in range(1, 4): # Thử tối đa 3 hướng rẽ (90, 180, 270)
+            self._log(f"[REPLAN] Lần {i}: Xoay phải 90 độ để tìm hướng mới...")
+            motor.turn_right()
+            time.sleep(t_90)
+            motor.stop()
+            
+            # Cập nhật hướng giả định của xe
+            self.current_heading = (self.current_heading + 90) % 360
+            
+            self._log("[REPLAN] Dừng 2s để ổn định Camera...")
+            time.sleep(2.0)
+            
+            if self.check_path_clear():
+                self._log("[REPLAN] Hướng đi trống! Đang tính toán lại lộ trình...")
+                found_clear = True
+                break
+            else:
+                self._log("[REPLAN] Hướng này có vạch trắng/vật cản, xoay tiếp...")
+
+        if not found_clear:
+            self._log("[REPLAN] Cảnh báo: Đã xoay 270 độ mà không tìm thấy đường trống!")
+
+        # 3. Tính toán lộ trình mới dựa trên hướng hiện tại
+        remaining_goals = [n for n in self.pause_nodes if n not in self.visited_waypoints]
+        remaining_goals.append(self.target_node)
+        
+        new_path = self.nav.get_sequential_path(blocked_u, remaining_goals)
+        
+        if new_path:
+            self.predefined_path = new_path
+            path_labels = [str(self._get_node_label(n)) for n in new_path]
+            self._log(f"[REPLAN] Lộ trình mới: {' -> '.join(path_labels)}")
+        else:
+            self._log("[REPLAN] Không tìm được lộ trình thay thế, thử đi tới đích cuối...")
+            new_path = self.nav.get_shortest_path(blocked_u, self.target_node)
+            if new_path: self.predefined_path = new_path
+
+        # Đặt trạng thái để xe bắt đầu di chuyển theo lộ trình mới
+        self.current_node = f"AVOIDING_FROM_{blocked_v}"
+        self.state = CarState.MOVING
+        self._log(f"[REPLAN] Bắt đầu di chuyển theo hướng {self.current_heading:.1f}°")
+
 
     def resume_mission(self):
         if self.state == CarState.WAITING:
@@ -597,17 +813,19 @@ class AutonomousCar:
             self.state = CarState.PLANNING
 
     def follow_lane(self):
-        raw_frame = camera_manager.get_frame()
-        if raw_frame is None:
+        # Get standardized resized frame directly from camera manager
+        small_frame = camera_manager.get_frame_resized((320, 240))
+        if small_frame is None:
             motor.move_straight()
             return
 
         # Xác định tỷ lệ quét dựa trên trạng thái (ngã tư hay đường thẳng)
         current_scan_y = SCAN_Y_INTERSECTION if self.blind_run_end_time is not None else SCAN_Y_NORMAL
 
-        # Gọi thuật toán standalone cải tiến
+        # Gọi thuật toán standalone cải tiến với frame đã thu nhỏ
         right_x, y_right, steering, memory_used, mode, display_frame, edges = \
-            follow_lane_frame(raw_frame, self.last_steering, self.pos_history, scan_y_ratio=current_scan_y)
+            follow_lane_frame(small_frame, self.last_steering, self.pos_history, 
+                              scan_y_ratio=current_scan_y, is_already_small=True)
 
         self.last_steering = steering
 
@@ -621,8 +839,8 @@ class AutonomousCar:
         state_color = (0, 255, 0) if "MOVING" in self.state.name or "FOLLOW" in self.state.name else (0, 0, 255)
         cv2.putText(display_frame, f"STATE: {self.state.name}", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, state_color, 2)
         
-        raw_h, raw_w = raw_frame.shape[:2]
-        h_ratio, w_ratio = 240 / raw_h, 320 / raw_w
+        # Use fixed dimensions for ratio calculation (Standard raw is 640x480, small is 320x240)
+        h_ratio, w_ratio = 240 / 480, 320 / 640
         for sign_type, conf, (rx, ry, rw, rh) in current_signs:
             # Adjust coordinates if ROI window was used, but detect_signs returns relative to top-left of image passed
             # In our case we passed the whole rgb_frame to detect_signs (which 내부적으로 crops)
@@ -662,6 +880,12 @@ class AutonomousCar:
         elif action =="TURN_AROUND":
             motor.turn_right(); time.sleep(t_180)
         motor.stop(); time.sleep(0.1)
+        
+        # Sau khi rẽ xong, cập nhật lại hướng xe theo vector segment hiện tại
+        if self.current_node and self.next_node and self.current_node in self.nav.nodes and self.next_node in self.nav.nodes:
+            dx = self.nav.nodes[self.next_node]['x'] - self.nav.nodes[self.current_node]['x']
+            dy = self.nav.nodes[self.next_node]['y'] - self.nav.nodes[self.current_node]['y']
+            self.current_heading = math.degrees(math.atan2(dy, dx))
 
     def _get_dist(self, u, v):
         try:
@@ -674,7 +898,9 @@ class AutonomousCar:
         if hasattr(self, 'nav') and node_id in self.nav.nodes:
             lbl = self.nav.nodes[node_id].get('label', '')
             return lbl if lbl else node_id
-        return node_id
+        return None
+
+
 
     def stop_system(self):
         """Safely stop all background threads and release resources."""
@@ -692,6 +918,10 @@ class AutonomousCar:
         if hasattr(self, '_sign_thread') and self._sign_thread and self._sign_thread.is_alive():
             self._sign_thread.join(timeout=0.5)
             
+        # Join Sonar thread
+        if hasattr(self, '_sonar_thread') and self._sonar_thread and self._sonar_thread.is_alive():
+            self._sonar_thread.join(timeout=0.5)
+            
         self._log("[STOP] Hệ thống đã dừng hoàn toàn.")
 
     def _log(self, msg: str):
@@ -700,4 +930,5 @@ class AutonomousCar:
             self.log_history[-1] = entry
         else:
             self.log_history.append(entry)
-            if len(self.log_history) > 200: self.log_history = self.log_history[-200:]
+            if len(self.log_history) > 100: # Reduced from 200 for memory
+                self.log_history.pop(0)

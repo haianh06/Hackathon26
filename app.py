@@ -101,10 +101,10 @@ def render_live_camera_and_status(show_settings=False, key_suffix="main"):
             with c1:
                 frame = None
                 if st.session_state.get("car_instance"): frame = getattr(st.session_state.car_instance, 'debug_frame', None)
-                if frame is None: frame = get_camera_manager().get_frame()
+                if frame is None: frame = get_camera_manager().get_frame_resized()
                 if frame is not None:
-                    _, buffer = cv2.imencode('.jpg', frame)
-                    st.image(buffer.tobytes(), width='stretch', caption="Live Camera")
+                    _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    st.image(buffer.tobytes(), use_container_width=True, caption="Live Camera")
                 else: st.info("Waiting for camera...")
             with c2:
                 st.markdown("### 🚦 Status")
@@ -226,7 +226,8 @@ if active_tab == "tab1":
                                         turn_config=st.session_state.turn_config, predefined_path=st.session_state.current_path,
                                         initial_heading=st.session_state.initial_heading,
                                         speed_px_per_sec=float(gm.speed_px_per_sec),
-                                        pause_nodes=[p1_node, p2_node])
+                                        pause_nodes=[p1_node, p2_node],
+                                        sonar_threshold=st.session_state.get("sonar_threshold", 25))
                     st.session_state.car_instance = car
                     st.session_state.car_thread = threading.Thread(target=car.execute, daemon=True)
                     st.session_state.car_thread.start()
@@ -235,6 +236,11 @@ if active_tab == "tab1":
         with c3:
             if st.button("🛑 EMERGENCY STOP", width='stretch', key="btn_emerg_stop"):
                 if 'car_instance' in st.session_state: st.session_state.car_instance.stop_system(); st.error("🛑 STOP COMMAND SENT")
+
+    # --- Sync Path from Car Instance ---
+    if st.session_state.get("car_instance") and st.session_state.car_instance.is_active:
+        if hasattr(st.session_state.car_instance, 'predefined_path') and st.session_state.car_instance.predefined_path:
+            st.session_state.current_path = st.session_state.car_instance.predefined_path
 
     map_fig = create_parking_lot_map(gm, st.session_state.current_path, st.session_state.s_node, None, sim.get_current_node(), 
                                     waypoints=st.session_state.multi_waypoints, visit_order=st.session_state.tour_visit_order,
@@ -266,6 +272,22 @@ elif active_tab == "tab2":
         if st.button("💾 Save All Timings", width='stretch', type="primary"):
             st.session_state.turn_config = {"STRAIGHT": t_s, "90_DEG_LEFT": t_l, "90_DEG_RIGHT": t_r, "180_DEG": t_180}
             _save_turn_config(st.session_state.turn_config); st.success("Timings saved!")
+
+    with st.expander("📡 Sonar Obstacle Avoidance", expanded=False):
+        st.subheader("Sonar Configuration")
+        if "sonar_threshold" not in st.session_state:
+            from autonomous_main import SONAR_THRESHOLD
+            st.session_state.sonar_threshold = SONAR_THRESHOLD
+            
+        new_thres = st.slider("Safety Threshold (cm)", 5, 100, int(st.session_state.sonar_threshold))
+        if new_thres != st.session_state.sonar_threshold:
+            st.session_state.sonar_threshold = new_thres
+            st.toast(f"Threshold updated to {new_thres} cm")
+            
+        st.info("💡 Hệ thống sẽ tự động dừng 3 giây khi gặp vật cản và phân tích 3 kịch bản:\n"
+                "1. Đối đầu: Quay đầu & Tìm đường mới.\n"
+                "2. Đi ngang: Tiếp tục lộ trình cũ.\n"
+                "3. Nối tiếp: Tiếp tục lộ trình cũ.")
 
         st.divider()
         st.subheader("🧪 Hardware Component Tests")

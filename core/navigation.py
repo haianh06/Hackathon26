@@ -30,6 +30,18 @@ class NavEngine:
                         heapq.heappush(queue, (next_cost, v2, path))
         return None
 
+    def get_sequential_path(self, start, goals):
+        """Lập lộ trình đi qua một danh sách các điểm mục tiêu theo thứ tự."""
+        full_path = [start]
+        current = start
+        for goal in goals:
+            p = self.get_shortest_path(current, goal)
+            if not p: return None
+            # Nối phần còn lại của path vào (bỏ qua điểm đầu của segment sau vì trùng với điểm cuối segment trước)
+            full_path.extend(p[1:])
+            current = goal
+        return full_path
+
     def get_action(self, prev_node, curr_node, next_node):
         # Fallback to straight if node coordinates are missing
         if not self.nodes or prev_node not in self.nodes or curr_node not in self.nodes or next_node not in self.nodes:
