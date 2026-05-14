@@ -1,0 +1,29 @@
+{
+    "mission_start_time": "Thu May 14 07:51:44 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "07:51:44",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "07:51:44",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "07:52:38",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 23.9cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "07:52:44",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": []
+}

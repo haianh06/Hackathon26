@@ -1,0 +1,19 @@
+{
+    "mission_start_time": "Thu May 14 08:18:07 2026",
+    "target_nodes": [
+        "1390DB055D"
+    ],
+    "events": [
+        {
+            "time": "08:18:07",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: A"
+        },
+        {
+            "time": "08:18:07",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại A"
+        }
+    ],
+    "signs_detected": []
+}

@@ -1,0 +1,64 @@
+{
+    "mission_start_time": "Thu May 14 07:42:55 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "07:42:55",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "07:42:55",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "07:43:28",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "07:43:29",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "07:43:41",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "07:43:41",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "07:43:48",
+            "type": "RFID",
+            "details": "Phát hiện Node: E"
+        },
+        {
+            "time": "07:43:48",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại E"
+        },
+        {
+            "time": "07:43:59",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 22.6cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "07:44:02",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "07:44:08",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": []
+}

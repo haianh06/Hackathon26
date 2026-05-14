@@ -1,0 +1,76 @@
+{
+    "mission_start_time": "Wed May 13 13:42:31 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "13:42:31",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "13:42:31",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "13:42:54",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "13:42:54",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "13:43:07",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "13:43:07",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "13:43:18",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: E"
+        },
+        {
+            "time": "13:44:07",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "13:44:07",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại E"
+        },
+        {
+            "time": "13:44:41",
+            "type": "RFID",
+            "details": "Phát hiện Node: G"
+        },
+        {
+            "time": "13:44:41",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại G"
+        },
+        {
+            "time": "13:44:54",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "straight",
+            "confidence": 0.5017498135566711,
+            "image_path": "data/sign_snapshots/straight_1778654661.jpg",
+            "timestamp": "Wed May 13 13:44:21 2026"
+        }
+    ]
+}

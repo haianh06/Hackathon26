@@ -1,0 +1,84 @@
+{
+    "mission_start_time": "Wed May 13 14:10:10 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "14:10:10",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "14:10:10",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại START"
+        },
+        {
+            "time": "14:10:38",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "14:10:38",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "14:10:51",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "14:10:51",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "14:11:02",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: E"
+        },
+        {
+            "time": "14:11:06",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:11:06",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại E"
+        },
+        {
+            "time": "14:11:19",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: D"
+        },
+        {
+            "time": "14:11:21",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:11:21",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại D"
+        },
+        {
+            "time": "14:11:37",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "14:11:37",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại A"
+        },
+        {
+            "time": "14:12:05",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": []
+}

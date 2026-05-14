@@ -1,0 +1,152 @@
+{
+    "mission_start_time": "Wed May 13 14:15:04 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "14:15:04",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "14:15:04",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "14:15:10",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 24.8cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:15:13",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:15:17",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 22.6cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:15:20",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:15:22",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 24.6cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:15:25",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:15:27",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 22.9cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:15:30",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:15:34",
+            "type": "OBSTACLE",
+            "details": "Phát hiện vật cản tại 19.1cm. Dừng quan sát 3s."
+        },
+        {
+            "time": "14:15:37",
+            "type": "OBSTACLE",
+            "details": "Trường hợp 2: Vật cản đi ngang (đột ngột). Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:15:50",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "14:15:50",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "14:16:02",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "14:16:02",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "14:16:13",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: E"
+        },
+        {
+            "time": "14:16:17",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:16:17",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại E"
+        },
+        {
+            "time": "14:16:42",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: D"
+        },
+        {
+            "time": "14:16:48",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "14:16:48",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại D"
+        },
+        {
+            "time": "14:16:59",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "14:16:59",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại A"
+        },
+        {
+            "time": "14:17:13",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "14:17:14",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại B"
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "right",
+            "confidence": 0.6614125370979309,
+            "image_path": "data/sign_snapshots/right_1778656543.jpg",
+            "timestamp": "Wed May 13 14:15:43 2026"
+        },
+        {
+            "type": "straight",
+            "confidence": 0.45740070939064026,
+            "image_path": "data/sign_snapshots/straight_1778656611.jpg",
+            "timestamp": "Wed May 13 14:16:51 2026"
+        }
+    ]
+}

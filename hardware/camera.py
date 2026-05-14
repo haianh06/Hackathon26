@@ -30,6 +30,9 @@ class CameraManager:
         self.thread = None
         self.picam2 = None  # Persistent camera objects
         self.cap = None
+        self.fps = 0.0
+        self._frame_count = 0
+        self._start_time = time.time()
         self._initialized = True
 
     def start(self):
@@ -119,6 +122,14 @@ class CameraManager:
                         time.sleep(1.0)
                 
                 if raw_frame is not None:
+                    # FPS Calculation
+                    self._frame_count += 1
+                    elapsed = time.time() - self._start_time
+                    if elapsed >= 1.0:
+                        self.fps = self._frame_count / elapsed
+                        self._frame_count = 0
+                        self._start_time = time.time()
+
                     # Pre-resize once for all consumers (e.g. 320x240)
                     small = cv2.resize(raw_frame, (320, 240))
                     with self.lock:

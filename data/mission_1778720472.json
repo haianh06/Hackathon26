@@ -1,0 +1,99 @@
+{
+    "mission_start_time": "Thu May 14 08:01:12 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "08:01:12",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "08:01:12",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại G"
+        },
+        {
+            "time": "08:01:39",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "08:01:39",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại A"
+        },
+        {
+            "time": "08:01:49",
+            "type": "RFID",
+            "details": "Phát hiện Node: D"
+        },
+        {
+            "time": "08:01:49",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại D"
+        },
+        {
+            "time": "08:01:58",
+            "type": "RFID",
+            "details": "Phát hiện Node: E"
+        },
+        {
+            "time": "08:01:58",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại E"
+        },
+        {
+            "time": "08:02:08",
+            "type": "RFID",
+            "details": "Phát hiện Node: F"
+        },
+        {
+            "time": "08:02:08",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại F"
+        },
+        {
+            "time": "08:02:18",
+            "type": "RFID",
+            "details": "Phát hiện Node: C"
+        },
+        {
+            "time": "08:02:18",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại C"
+        },
+        {
+            "time": "08:02:26",
+            "type": "RFID",
+            "details": "Phát hiện Node: B"
+        },
+        {
+            "time": "08:02:26",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại B"
+        },
+        {
+            "time": "08:02:36",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "08:02:36",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại A"
+        },
+        {
+            "time": "08:03:05",
+            "type": "RFID",
+            "details": "Phát hiện Node: START"
+        },
+        {
+            "time": "08:03:05",
+            "type": "ARRIVED",
+            "details": "Đã hoàn thành toàn bộ hành trình tại: START"
+        }
+    ],
+    "signs_detected": []
+}

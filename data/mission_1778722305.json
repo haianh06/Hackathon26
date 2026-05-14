@@ -1,0 +1,76 @@
+{
+    "mission_start_time": "Thu May 14 08:31:45 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "08:31:45",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "08:31:45",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "08:32:06",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: A"
+        },
+        {
+            "time": "08:32:10",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "08:32:10",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại A"
+        },
+        {
+            "time": "08:32:17",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: D"
+        },
+        {
+            "time": "08:32:18",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "08:32:18",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: TURN_AROUND tại D"
+        },
+        {
+            "time": "08:32:24",
+            "type": "RFID",
+            "details": "Phát hiện Node: A"
+        },
+        {
+            "time": "08:32:24",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại A"
+        },
+        {
+            "time": "08:32:59",
+            "type": "RFID",
+            "details": "Phát hiện Node: START"
+        },
+        {
+            "time": "08:32:59",
+            "type": "ARRIVED",
+            "details": "Đã hoàn thành toàn bộ hành trình tại: START"
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "right",
+            "confidence": 0.6781013607978821,
+            "image_path": "data/sign_snapshots/right_1778722356.jpg",
+            "timestamp": "Thu May 14 08:32:36 2026"
+        }
+    ]
+}

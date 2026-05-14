@@ -1,0 +1,54 @@
+{
+    "mission_start_time": "Wed May 13 13:25:57 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "13:25:57",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "13:25:57",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "13:26:23",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: A"
+        },
+        {
+            "time": "13:26:29",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "13:26:30",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        },
+        {
+            "time": "13:26:42",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: B"
+        },
+        {
+            "time": "13:26:45",
+            "type": "RESUME",
+            "details": "Người dùng xác nhận. Tiếp tục lộ trình."
+        },
+        {
+            "time": "13:26:45",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại B"
+        },
+        {
+            "time": "13:27:01",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": []
+}

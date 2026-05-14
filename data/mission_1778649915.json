@@ -1,0 +1,24 @@
+{
+    "mission_start_time": "Wed May 13 12:25:15 2026",
+    "target_nodes": [
+        "A1791B16D5"
+    ],
+    "events": [
+        {
+            "time": "12:25:15",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START"
+        },
+        {
+            "time": "12:25:15",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START"
+        },
+        {
+            "time": "12:25:18",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến điểm mốc: B"
+        }
+    ],
+    "signs_detected": []
+}
