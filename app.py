@@ -167,6 +167,30 @@ gm = st.session_state.graph_manager
 sim = st.session_state.simulator
 
 st.title("🚗 Autonomous Parking Mission")
+
+# --- Map Selection ---
+map_files = {
+    "🗺️ Bản đồ 1 (Mặc định)": "data/graph.json",
+    "🏆 Bản đồ 2 (Chung kết)": "data/graph_final.json"
+}
+
+# Find current map label
+current_map_path = st.session_state.graph_manager.current_path
+default_map_label = next((k for k, v in map_files.items() if v == current_map_path), list(map_files.keys())[0])
+
+selected_map_label = st.selectbox("🗺️ Chọn bản đồ", list(map_files.keys()), index=list(map_files.keys()).index(default_map_label))
+selected_map_path = map_files[selected_map_label]
+
+if selected_map_path != current_map_path:
+    st.session_state.graph_manager.load_from_json(selected_map_path)
+    st.session_state.current_path = []
+    st.session_state.multi_waypoints = []
+    st.session_state.s_node = None
+    st.session_state.e_node = None
+    st.session_state.map_key += 1
+    st.toast(f"Đã tải {selected_map_label}")
+    st.rerun()
+
 tab_options = {"🌐 Mission Dashboard": "tab1", "🔧 System Settings": "tab2", "🎮 Manual Control": "tab3", "📝 Mission History": "tab4"}
 active_tab = tab_options[st.radio("Navigation", list(tab_options.keys()), horizontal=True, label_visibility="collapsed")]
 st.markdown("---")
@@ -180,15 +204,26 @@ if active_tab == "tab1":
             lbl = gm.graph.nodes[nid].get('label')
             return lbl if lbl else nid
         
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        start_node = m_col1.selectbox("🏠 START", real_nodes, format_func=node_fmt)
-        p1_node = m_col2.selectbox("📍 Point 1", real_nodes, index=min(1, len(real_nodes)-1), format_func=node_fmt)
-        p2_node = m_col3.selectbox("📍 Point 2", real_nodes, index=min(2, len(real_nodes)-1), format_func=node_fmt)
+        is_final_map = "graph_final.json" in st.session_state.graph_manager.current_path
         
-        # New Direction Selector (NWES)
+        # Determine number of intermediate points
+        num_intermediate = 4 if is_final_map else 2
+        
+        # Create columns for Start + Points
+        cols = st.columns(num_intermediate + 1)
+        start_node = cols[0].selectbox("🏠 START", real_nodes, format_func=node_fmt)
+        
+        intermediate_nodes = []
+        for i in range(num_intermediate):
+            p_node = cols[i+1].selectbox(f"📍 Point {i+1}", real_nodes, index=min(i+1, len(real_nodes)-1), format_func=node_fmt, key=f"p{i+1}_node")
+            intermediate_nodes.append(p_node)
+            
+        # Direction Selector
+        st.divider()
+        m_col_dir = st.columns(1)[0]
         dir_opts = {"Bắc (North)": 90, "Đông (East)": 0, "Nam (South)": 270, "Tây (West)": 180}
         curr_dir_label = next((k for k, v in dir_opts.items() if v == st.session_state.initial_heading), "Đông (East)")
-        selected_dir = m_col4.selectbox("🧭 Hướng xe", list(dir_opts.keys()), index=list(dir_opts.keys()).index(curr_dir_label))
+        selected_dir = m_col_dir.selectbox("🧭 Hướng xe", list(dir_opts.keys()), index=list(dir_opts.keys()).index(curr_dir_label))
         st.session_state.initial_heading = dir_opts[selected_dir]
         st.session_state.heading_set = True
 
@@ -201,13 +236,15 @@ if active_tab == "tab1":
         c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("🗺️ Generate Route", type="primary", width='stretch', key="btn_gen_route"):
-                path, cost, _ = compute_sequential_path(gm, start_node, [p1_node, p2_node, start_node], initial_heading=st.session_state.initial_heading)
+                # Goal list: [P1, P2, ..., Start]
+                goals = intermediate_nodes + [start_node]
+                path, cost, _ = compute_sequential_path(gm, start_node, goals, initial_heading=st.session_state.initial_heading)
                 if path:
                     st.session_state.current_path = path
-                    st.session_state.multi_waypoints = [p1_node, p2_node, start_node]
-                    st.session_state.tour_visit_order = [p1_node, p2_node, start_node]
+                    st.session_state.multi_waypoints = goals
+                    st.session_state.tour_visit_order = goals
                     st.session_state.s_node = start_node
-                    st.toast(f"✅ Route generated (Heading: {selected_dir})")
+                    st.toast(f"✅ Route generated with {len(goals)} stops.")
         
         with c2:
             if st.button("🚀 START MISSION", width='stretch', key="btn_start_mission"):
@@ -226,7 +263,7 @@ if active_tab == "tab1":
                                         turn_config=st.session_state.turn_config, predefined_path=st.session_state.current_path,
                                         initial_heading=st.session_state.initial_heading,
                                         speed_px_per_sec=float(gm.speed_px_per_sec),
-                                        pause_nodes=[p1_node, p2_node],
+                                        pause_nodes=intermediate_nodes,
                                         sonar_threshold=st.session_state.get("sonar_threshold", 25))
                     st.session_state.car_instance = car
                     st.session_state.car_thread = threading.Thread(target=car.execute, daemon=True)

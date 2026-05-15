@@ -1,0 +1,87 @@
+{
+    "mission_start_time": "Fri May 15 15:11:25 2026",
+    "target_nodes": [
+        "00BABC6264"
+    ],
+    "events": [
+        {
+            "time": "15:11:25",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START_B"
+        },
+        {
+            "time": "15:11:25",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại START_B"
+        },
+        {
+            "time": "15:11:48",
+            "type": "RFID",
+            "details": "Phát hiện Node: I"
+        },
+        {
+            "time": "15:11:48",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại I"
+        },
+        {
+            "time": "15:11:56",
+            "type": "RFID",
+            "details": "Phát hiện Node: F"
+        },
+        {
+            "time": "15:11:56",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại F"
+        },
+        {
+            "time": "15:12:03",
+            "type": "RFID",
+            "details": "Phát hiện Node: C"
+        },
+        {
+            "time": "15:12:03",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại C"
+        },
+        {
+            "time": "15:12:30",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến đúng trình tự: START_A (Điểm 1)"
+        },
+        {
+            "time": "15:12:35",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: TURN_AROUND tại START_A"
+        },
+        {
+            "time": "15:12:41",
+            "type": "ARRIVAL_POI",
+            "details": "Đã đến đúng trình tự: C (Điểm 2)"
+        },
+        {
+            "time": "15:12:46",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại C"
+        },
+        {
+            "time": "15:13:00",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "straight",
+            "confidence": 0.5571677684783936,
+            "image_path": "data/sign_snapshots/straight_1778832689.jpg",
+            "timestamp": "Fri May 15 15:11:29 2026"
+        },
+        {
+            "type": "right",
+            "confidence": 0.5362545251846313,
+            "image_path": "data/sign_snapshots/right_1778832689.jpg",
+            "timestamp": "Fri May 15 15:11:29 2026"
+        }
+    ]
+}

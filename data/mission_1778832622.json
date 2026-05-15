@@ -1,0 +1,19 @@
+{
+    "mission_start_time": "Fri May 15 15:10:22 2026",
+    "target_nodes": [
+        "00BABC6264"
+    ],
+    "events": [
+        {
+            "time": "15:10:22",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START_B"
+        },
+        {
+            "time": "15:10:22",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại START_B"
+        }
+    ],
+    "signs_detected": []
+}

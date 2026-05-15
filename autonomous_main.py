@@ -19,8 +19,7 @@ import json
 BASE_SPEED          = 120
 TARGET_RIGHT        = 300
 TARGET_LEFT         = 20
-SCAN_Y_NORMAL       = 0.75     # Tỷ lệ quét đường thẳng (nhìn gần)
-SCAN_Y_INTERSECTION = 0.65     # Tỷ lệ quét ở ngã tư (nhìn xa)
+SCAN_Y_NORMAL       = 0.7     # Tỷ lệ quét làn đường (mặc định)
 SCAN_SEARCH_UP_ROWS = 35       # How many rows upward to search for lane edge
 STEERING_GAIN       = 3        # Proportional gain
 
@@ -250,6 +249,7 @@ class CarState(Enum):
     ARRIVED = auto()
     WAITING = auto()
     OBSTACLE_STOP = auto()
+    REALIGNING = auto()
 
 class AutonomousCar:
     def __init__(self, target_node, graph, turn_table, rfid_map, turn_config, predefined_path=None, initial_heading=0, speed_px_per_sec=65.0, pause_nodes=None, sonar_threshold=25.0):
@@ -259,10 +259,14 @@ class AutonomousCar:
         self.turn_config = turn_config
         self.predefined_path = predefined_path
         self.current_heading = initial_heading
+        self.start_heading = initial_heading
         self.speed_px_per_sec = speed_px_per_sec
         self.waypoints = predefined_path if predefined_path else []
         self.pause_nodes = pause_nodes if pause_nodes else []
+        self.next_pause_idx = 0
         self.visited_waypoints = []
+        self.waiting_start_time = 0
+        self.PAUSE_DURATION = 5.0 # Seconds to wait at each point
 
         self.prev_node = None
         self.current_node = predefined_path[0] if predefined_path else None
@@ -550,13 +554,23 @@ class AutonomousCar:
                     self.prev_node = None
 
                 self.current_node = detected
-                if detected in self.pause_nodes and detected not in self.visited_waypoints:
-                    self.visited_waypoints.append(detected)
-                    self._log_event("ARRIVAL_POI", f"Đã đến điểm mốc: {self._get_node_label(detected)}")
-                    self.state = CarState.WAITING
-                    motor.stop()
-                    self._log("[WAIT] Đang đợi xác nhận của người dùng để tiếp tục...")
-                else:
+                
+                # Enforce strict sequential pause logic
+                if self.next_pause_idx < len(self.pause_nodes):
+                    expected_node = self.pause_nodes[self.next_pause_idx]
+                    if detected == expected_node:
+                        self.visited_waypoints.append(detected)
+                        self.next_pause_idx += 1
+                        self._log_event("ARRIVAL_POI", f"Đã đến đúng trình tự: {self._get_node_label(detected)} (Điểm {self.next_pause_idx})")
+                        self.state = CarState.WAITING
+                        self.waiting_start_time = time.time()
+                        motor.stop()
+                        self._log(f"[WAIT] Tự động dừng {self.PAUSE_DURATION}s...")
+                    elif detected in self.pause_nodes:
+                        self._log(f"[NAV] Đi qua {self._get_node_label(detected)} nhưng chưa tới lượt dừng (Đang chờ {self._get_node_label(expected_node)})")
+                
+                # Log general RFID detection
+                if self.state != CarState.WAITING:
                     self._log_event("RFID", f"Phát hiện Node: {self._get_node_label(detected)}")
                 
                 # Cập nhật hướng dựa trên tọa độ thực tế khi đi qua 2 node
@@ -581,10 +595,10 @@ class AutonomousCar:
             if self.current_node == self.target_node:
                 # If we have a loop path (Start == End), only arrive if we've traversed the intermediate points.
                 if not self.predefined_path or len(self.predefined_path) <= 1:
-                    self.state = CarState.ARRIVED
-                    motor.stop()
-                    self.is_active = False
+                    self._log(f"[FINISH] Arrived at target: {self._get_node_label(self.target_node)}")
+                    self.state = CarState.REALIGNING
                     return
+
 
             # --- 3. Plan next move ---
             path = None
@@ -682,8 +696,17 @@ class AutonomousCar:
         
         elif self.state == CarState.WAITING:
             motor.stop()
-            # Stays in WAITING until resume_mission() is called
+            elapsed = time.time() - self.waiting_start_time
+            if elapsed >= self.PAUSE_DURATION:
+                self._log(f"[RESUME] Đã hết {self.PAUSE_DURATION}s. Tự động tiếp tục lộ trình.")
+                self.state = CarState.PLANNING
             pass
+
+        elif self.state == CarState.REALIGNING:
+            self.perform_realignment()
+            self.state = CarState.ARRIVED
+            motor.stop()
+            self.is_active = False
 
     def handle_obstacle_resolution(self):
         """Phân tích 3 giây dữ liệu sonar để quyết định hành động."""
@@ -812,6 +835,35 @@ class AutonomousCar:
             self._log_event("RESUME", "Người dùng xác nhận. Tiếp tục lộ trình.")
             self.state = CarState.PLANNING
 
+    def perform_realignment(self):
+        """Rotate the car to face the initial starting heading."""
+        # Normalize headings to [0, 360)
+        curr = self.current_heading % 360
+        target = self.start_heading % 360
+        
+        diff = (target - curr + 360) % 360
+        if diff < 5 or diff > 355:
+            self._log(f"[REALIGN] Already aligned to {target}°")
+            return
+
+        self._log(f"[REALIGN] Current: {curr:.1f}° | Target: {target:.1f}° | Turning: {diff}°")
+        
+        # Determine best turn
+        if 80 <= diff <= 100:
+            motor.turn_right(); time.sleep(self.turn_config.get("90_DEG_RIGHT", 1.2))
+        elif 260 <= diff <= 280:
+            motor.turn_left(); time.sleep(self.turn_config.get("90_DEG_LEFT", 1.2))
+        elif 170 <= diff <= 190:
+            motor.turn_right(); time.sleep(self.turn_config.get("180_DEG", 2.4))
+        else:
+            # For arbitrary angles, we might need more complex logic, 
+            # but for our grid (0, 90, 180, 270) these cover all cases.
+            self._log(f"[REALIGN] No standard turn for {diff}°, skipping.")
+        
+        motor.stop()
+        self.current_heading = target
+        self._log(f"[REALIGN] Finished. Heading is now {target}°")
+
     def follow_lane(self):
         # Get standardized resized frame directly from camera manager
         small_frame = camera_manager.get_frame_resized((320, 240))
@@ -819,8 +871,8 @@ class AutonomousCar:
             motor.move_straight()
             return
 
-        # Xác định tỷ lệ quét dựa trên trạng thái (ngã tư hay đường thẳng)
-        current_scan_y = SCAN_Y_INTERSECTION if self.blind_run_end_time is not None else SCAN_Y_NORMAL
+        # Sử dụng tỷ lệ quét mặc định
+        current_scan_y = SCAN_Y_NORMAL
 
         # Gọi thuật toán standalone cải tiến với frame đã thu nhỏ
         right_x, y_right, steering, memory_used, mode, display_frame, edges = \
@@ -877,10 +929,13 @@ class AutonomousCar:
             if eff_straight > 0:
                 motor.move_straight(); time.sleep(eff_straight)
             motor.turn_left(); time.sleep(t_90_left)
+        elif action == "STRAIGHT":
+            if eff_straight > 0:
+                motor.move_straight(); time.sleep(eff_straight)
         elif action =="TURN_AROUND":
             motor.turn_right(); time.sleep(t_180)
         motor.stop(); time.sleep(0.1)
-        
+
         # Sau khi rẽ xong, cập nhật lại hướng xe theo vector segment hiện tại
         if self.current_node and self.next_node and self.current_node in self.nav.nodes and self.next_node in self.nav.nodes:
             dx = self.nav.nodes[self.next_node]['x'] - self.nav.nodes[self.current_node]['x']

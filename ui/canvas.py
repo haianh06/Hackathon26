@@ -47,8 +47,24 @@ def create_parking_lot_map(
 
     fig = go.Figure()
 
-    # Add hidden scatter grid across plotting area [-5, 105] to capture ANY click
-    grid_x, grid_y = np.meshgrid(np.arange(-5, 105, 2), np.arange(-5, 105, 2))
+    # --- Dynamic Range Calculation ---
+    node_coords = [(d['x'], d['y']) for n, d in G.nodes(data=True)]
+    if node_coords:
+        xs, ys = zip(*node_coords)
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        padding = 15
+        x_range = [min_x - padding, max_x + padding]
+        y_range = [min_y - padding, max_y + padding]
+    else:
+        x_range = [-5, 105]
+        y_range = [-5, 105]
+
+    # Add hidden scatter grid across plotting area to capture ANY click
+    grid_x, grid_y = np.meshgrid(
+        np.arange(x_range[0], x_range[1], (x_range[1] - x_range[0]) / 50), 
+        np.arange(y_range[0], y_range[1], (y_range[1] - y_range[0]) / 50)
+    )
     fig.add_trace(go.Scatter(
         x=grid_x.flatten(),
         y=grid_y.flatten(),
@@ -59,14 +75,31 @@ def create_parking_lot_map(
         name='background_grid'
     ))
 
-    # Add shapes for white obstacle blocks
-    shapes = [
-        dict(type="rect", x0=10, y0=70, x1=90, y1=95, fillcolor="white", line=dict(color="white"), layer="below"),
-        dict(type="rect", x0=10, y0=35, x1=40, y1=60, fillcolor="white", line=dict(color="white"), layer="below"),
-        dict(type="rect", x0=60, y0=35, x1=90, y1=60, fillcolor="white", line=dict(color="white"), layer="below"),
-        dict(type="rect", x0=10, y0=5,  x1=40, y1=25, fillcolor="white", line=dict(color="white"), layer="below"),
-        dict(type="rect", x0=60, y0=5,  x1=90, y1=25, fillcolor="white", line=dict(color="white"), layer="below"),
-    ]
+    # Add shapes for white obstacle blocks (Map 1 specific)
+    shapes = []
+    if "graph.json" in graph_manager.current_path:
+        shapes = [
+            dict(type="rect", x0=10, y0=70, x1=90, y1=95, fillcolor="white", line=dict(color="white"), layer="below"),
+            dict(type="rect", x0=10, y0=35, x1=40, y1=60, fillcolor="white", line=dict(color="white"), layer="below"),
+            dict(type="rect", x0=60, y0=35, x1=90, y1=60, fillcolor="white", line=dict(color="white"), layer="below"),
+            dict(type="rect", x0=10, y0=5,  x1=40, y1=25, fillcolor="white", line=dict(color="white"), layer="below"),
+            dict(type="rect", x0=60, y0=5,  x1=90, y1=25, fillcolor="white", line=dict(color="white"), layer="below"),
+        ]
+    elif "graph_final.json" in graph_manager.current_path:
+        # Define shapes for Map 2 (Final) based on the 3x3 grid
+        # These are the "islands" between rows 100, 200, 300 and cols 0, 100, 200
+        shapes = [
+            # Top blocks
+            dict(type="rect", x0=10, y0=210, x1=90, y1=290, fillcolor="white", line=dict(color="white"), layer="below"),
+            dict(type="rect", x0=110, y0=210, x1=190, y1=290, fillcolor="white", line=dict(color="white"), layer="below"),
+            # Middle blocks
+            dict(type="rect", x0=10, y0=110, x1=90, y1=190, fillcolor="white", line=dict(color="white"), layer="below"),
+            dict(type="rect", x0=110, y0=110, x1=190, y1=190, fillcolor="white", line=dict(color="white"), layer="below"),
+            # Large top block
+            dict(type="rect", x0=10, y0=310, x1=190, y1=390, fillcolor="white", line=dict(color="white"), layer="below"),
+            # Large bottom block
+            dict(type="rect", x0=10, y0=10, x1=190, y1=90, fillcolor="white", line=dict(color="white"), layer="below"),
+        ]
 
     # ── Regular (non-path) edges ──────────────────────────────────────────
     path_edge_set = set()
@@ -244,8 +277,8 @@ def create_parking_lot_map(
         paper_bgcolor='#E0E0E0',
         shapes=shapes,
         margin=dict(b=20, l=5, r=5, t=40),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-5, 105]),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-5, 105]),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=x_range),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=y_range),
         clickmode='event+select',
         dragmode='pan',
         title_font=dict(color="blue", size=20)

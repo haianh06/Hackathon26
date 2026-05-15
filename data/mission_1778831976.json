@@ -1,0 +1,61 @@
+{
+    "mission_start_time": "Fri May 15 14:59:36 2026",
+    "target_nodes": [
+        "00BABC6264"
+    ],
+    "events": [
+        {
+            "time": "14:59:36",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: START_B"
+        },
+        {
+            "time": "14:59:36",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại START_B"
+        },
+        {
+            "time": "14:59:49",
+            "type": "RFID",
+            "details": "Phát hiện Node: I"
+        },
+        {
+            "time": "14:59:49",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: STRAIGHT tại I"
+        },
+        {
+            "time": "14:59:58",
+            "type": "RFID",
+            "details": "Phát hiện Node: G"
+        },
+        {
+            "time": "14:59:58",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: RIGHT tại G"
+        },
+        {
+            "time": "15:00:05",
+            "type": "RFID",
+            "details": "Phát hiện Node: E"
+        },
+        {
+            "time": "15:00:05",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại E"
+        },
+        {
+            "time": "15:00:14",
+            "type": "STOPPED",
+            "details": "Mission dừng sớm hoặc bị hủy bởi người dùng."
+        }
+    ],
+    "signs_detected": [
+        {
+            "type": "right",
+            "confidence": 0.6477485299110413,
+            "image_path": "data/sign_snapshots/right_1778831976.jpg",
+            "timestamp": "Fri May 15 14:59:36 2026"
+        }
+    ]
+}

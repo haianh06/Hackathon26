@@ -1,0 +1,19 @@
+{
+    "mission_start_time": "Fri May 15 14:50:35 2026",
+    "target_nodes": [
+        "A778D6050C"
+    ],
+    "events": [
+        {
+            "time": "14:50:35",
+            "type": "START",
+            "details": "Hành trình bắt đầu. Điểm đích cuối: A"
+        },
+        {
+            "time": "14:50:35",
+            "type": "TURN_EXEC",
+            "details": "Lệnh điều hướng: LEFT tại A"
+        }
+    ],
+    "signs_detected": []
+}

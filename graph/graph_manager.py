@@ -11,13 +11,17 @@ class GraphManager:
         self._counter: int = 0
         self._waypoint_counter: int = 0
         self.speed_px_per_sec: float = 5.0
+        self.current_path: str = self.DEFAULT_SAVE_PATH
 
     # ─────────────────────────── Persistence ────────────────────────────────
 
-    def load_from_json(self, path: str = DEFAULT_SAVE_PATH):
+    def load_from_json(self, path: str = None):
         """Load nodes, edges, and settings from a JSON file."""
+        if path:
+            self.current_path = path
+        
         try:
-            with open(path, "r") as f:
+            with open(self.current_path, "r") as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return
@@ -40,9 +44,10 @@ class GraphManager:
                 label=edge.get("label", "")
             )
 
-    def save_to_json(self, path: str = DEFAULT_SAVE_PATH):
+    def save_to_json(self, path: str = None):
         """Persist the current graph state to a JSON file."""
-        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+        save_path = path if path else self.current_path
+        os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else ".", exist_ok=True)
         nodes = {n: dict(d) for n, d in self.graph.nodes(data=True)}
         edges = [
             {"u": u, "v": v, "weight": d.get("weight", 1.0), "label": d.get("label", "")}
@@ -55,11 +60,11 @@ class GraphManager:
             "waypoint_counter": self._waypoint_counter,
             "speed_px_per_sec": self.speed_px_per_sec,
         }
-        with open(path, "w") as f:
+        with open(save_path, "w") as f:
             json.dump(payload, f, indent=4)
 
     def _auto_save(self):
-        self.save_to_json(self.DEFAULT_SAVE_PATH)
+        self.save_to_json()
 
     # ──────────────────────────── Node CRUD ─────────────────────────────────
 
