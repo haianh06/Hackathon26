@@ -188,3 +188,4 @@ rfid_test.log
 *.png
 !data/templates/*.png
 !data/templates/.gitkeep
+!data/mission_*.json
