@@ -19,7 +19,7 @@ import json
 BASE_SPEED          = 120
 TARGET_RIGHT        = 300
 TARGET_LEFT         = 20
-SCAN_Y_NORMAL       = 0.7     # Tỷ lệ quét làn đường (mặc định)
+SCAN_Y_NORMAL       = 0.75     # Tỷ lệ quét làn đường (mặc định)
 SCAN_SEARCH_UP_ROWS = 35       # How many rows upward to search for lane edge
 STEERING_GAIN       = 3        # Proportional gain
 
@@ -837,6 +837,14 @@ class AutonomousCar:
 
     def perform_realignment(self):
         """Rotate the car to face the initial starting heading."""
+        # Đi thẳng một đoạn trước khi xoay
+        self._log("[REALIGN] Tiến lên một đoạn ngắn trước khi xoay về hướng ban đầu...")
+        t_straight = self.turn_config.get("STRAIGHT", 1.5)
+        motor.move_straight()
+        time.sleep(t_straight)
+        motor.stop()
+        time.sleep(0.5)
+
         # Normalize headings to [0, 360)
         curr = self.current_heading % 360
         target = self.start_heading % 360
@@ -850,9 +858,9 @@ class AutonomousCar:
         
         # Determine best turn
         if 80 <= diff <= 100:
-            motor.turn_right(); time.sleep(self.turn_config.get("90_DEG_RIGHT", 1.2))
-        elif 260 <= diff <= 280:
             motor.turn_left(); time.sleep(self.turn_config.get("90_DEG_LEFT", 1.2))
+        elif 260 <= diff <= 280:
+            motor.turn_right(); time.sleep(self.turn_config.get("90_DEG_RIGHT", 1.2))
         elif 170 <= diff <= 190:
             motor.turn_right(); time.sleep(self.turn_config.get("180_DEG", 2.4))
         else:

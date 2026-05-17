@@ -94,11 +94,10 @@ if "turn_config" not in st.session_state: st.session_state.turn_config = _load_t
 
 # --- Fragments ---
 @st.fragment(run_every=1.0)
-def render_live_camera_and_status(show_settings=False, key_suffix="main"):
+def render_live_camera_and_status(compact=False, key_suffix="main"):
     if HAS_HW:
         with st.container(border=True):
-            c1, c2 = st.columns([2, 1])
-            with c1:
+            if compact:
                 frame = None
                 if st.session_state.get("car_instance"): frame = getattr(st.session_state.car_instance, 'debug_frame', None)
                 if frame is None: frame = get_camera_manager().get_frame_resized()
@@ -106,16 +105,14 @@ def render_live_camera_and_status(show_settings=False, key_suffix="main"):
                     _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     st.image(buffer.tobytes(), use_container_width=True, caption="Live Camera")
                 else: st.info("Waiting for camera...")
-            with c2:
+                
                 st.markdown("### 🚦 Status")
                 is_auton = st.session_state.get("car_instance") and st.session_state.car_instance.is_active
                 st.metric("Mode", "Autonomous" if is_auton else "Standby")
                 if st.button("🔄 Refresh Stream", key=f"ref_{key_suffix}"): _reinit_camera(); st.rerun()
                 
-                # --- Waiting for User Confirmation ---
                 if st.session_state.get("car_instance") and getattr(st.session_state.car_instance, 'state', None) and st.session_state.car_instance.state.name == "WAITING":
                     st.divider()
-                    # Custom CSS for a big red button
                     st.markdown("""
                         <style>
                         .stButton>button[kind="primary"] {
@@ -128,11 +125,47 @@ def render_live_camera_and_status(show_settings=False, key_suffix="main"):
                         }
                         </style>
                     """, unsafe_allow_html=True)
-                    
                     if st.button("🚀 TIẾP TỤC HÀNH TRÌNH", type="primary", use_container_width=True):
                         st.session_state.car_instance.resume_mission()
                         st.rerun()
                     st.info("💡 Nhấn nút đỏ ở trên để xe tiếp tục di chuyển.")
+            else:
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    frame = None
+                    if st.session_state.get("car_instance"): frame = getattr(st.session_state.car_instance, 'debug_frame', None)
+                    if frame is None: frame = get_camera_manager().get_frame_resized()
+                    if frame is not None:
+                        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                        st.image(buffer.tobytes(), use_container_width=True, caption="Live Camera")
+                    else: st.info("Waiting for camera...")
+                with c2:
+                    st.markdown("### 🚦 Status")
+                    is_auton = st.session_state.get("car_instance") and st.session_state.car_instance.is_active
+                    st.metric("Mode", "Autonomous" if is_auton else "Standby")
+                    if st.button("🔄 Refresh Stream", key=f"ref_{key_suffix}"): _reinit_camera(); st.rerun()
+                    
+                    # --- Waiting for User Confirmation ---
+                    if st.session_state.get("car_instance") and getattr(st.session_state.car_instance, 'state', None) and st.session_state.car_instance.state.name == "WAITING":
+                        st.divider()
+                        # Custom CSS for a big red button
+                        st.markdown("""
+                            <style>
+                            .stButton>button[kind="primary"] {
+                                background-color: #ff1744 !important;
+                                color: white !important;
+                                border: none !important;
+                                height: 4em !important;
+                                font-size: 24px !important;
+                                font-weight: bold !important;
+                            }
+                            </style>
+                        """, unsafe_allow_html=True)
+                        
+                        if st.button("🚀 TIẾP TỤC HÀNH TRÌNH", type="primary", use_container_width=True):
+                            st.session_state.car_instance.resume_mission()
+                            st.rerun()
+                        st.info("💡 Nhấn nút đỏ ở trên để xe tiếp tục di chuyển.")
 
 @st.fragment(run_every=1.5)
 def render_live_logs():
@@ -196,7 +229,6 @@ active_tab = tab_options[st.radio("Navigation", list(tab_options.keys()), horizo
 st.markdown("---")
 
 if active_tab == "tab1":
-    render_live_camera_and_status()
     st.subheader("🚀 Mission Planning (START → P1 → P2 → START)")
     with st.container(border=True):
         real_nodes = [n for n in gm.graph.nodes() if not str(n).startswith("V_")]
@@ -279,19 +311,25 @@ if active_tab == "tab1":
         if hasattr(st.session_state.car_instance, 'predefined_path') and st.session_state.car_instance.predefined_path:
             st.session_state.current_path = st.session_state.car_instance.predefined_path
 
-    map_fig = create_parking_lot_map(gm, st.session_state.current_path, st.session_state.s_node, None, sim.get_current_node(), 
-                                    waypoints=st.session_state.multi_waypoints, visit_order=st.session_state.tour_visit_order,
-                                    initial_heading=st.session_state.initial_heading)
-    main_event = st.plotly_chart(map_fig, width='stretch', on_select="rerun", key="main_map")
+    st.divider()
+    st.subheader("👁️ Live Observation")
     
-    if main_event and "selection" in main_event and main_event["selection"]["points"]:
-        # Clicks on the main map no longer set heading. 
-        # Future use cases can be added here (e.g. quick select waypoint)
-        pass
+    obs_col1, obs_col2 = st.columns([2, 1])
     
-    col_l, col_r = st.columns(2)
-    with col_l: render_live_logs()
-    with col_r: render_sign_gallery()
+    with obs_col1:
+        map_fig = create_parking_lot_map(gm, st.session_state.current_path, st.session_state.s_node, None, sim.get_current_node(), 
+                                        waypoints=st.session_state.multi_waypoints, visit_order=st.session_state.tour_visit_order,
+                                        initial_heading=st.session_state.initial_heading)
+        main_event = st.plotly_chart(map_fig, width='stretch', on_select="rerun", key="main_map")
+        
+        if main_event and "selection" in main_event and main_event["selection"]["points"]:
+            pass
+            
+        render_sign_gallery()
+        
+    with obs_col2:
+        render_live_camera_and_status(compact=True)
+        render_live_logs()
 
 elif active_tab == "tab2":
     st.header("🔧 System Settings & Calibration")
